@@ -17,6 +17,8 @@ from transformers import (
     set_seed,
 )
 from utils_qa import check_no_error, postprocess_qa_predictions
+import wandb
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +26,7 @@ logger = logging.getLogger(__name__)
 def main():
     # 가능한 arguments 들은 ./arguments.py 나 transformer package 안의 src/transformers/training_args.py 에서 확인 가능합니다.
     # --help flag 를 실행시켜서 확인할 수 도 있습니다.
-
+    wandb.init(project = 'MRC', name = 'valid_test')
     parser = HfArgumentParser(
         (ModelArguments, DataTrainingArguments, TrainingArguments)
     )
@@ -32,12 +34,17 @@ def main():
     print(model_args.model_name_or_path)
 
     # [참고] argument를 manual하게 수정하고 싶은 경우에 아래와 같은 방식을 사용할 수 있습니다
-    # training_args.per_device_train_batch_size = 4
+    # training_args.per_device_train_batch_size = 4 
     # print(training_args.per_device_train_batch_size)
+    # training_args.evaluation_strategy = 'steps'
+    # training_args.save_strategy = 'steps'
+    # training_args.logging_strategy = 'steps'
+    # training_args.metric_for_best_model = "eval_loss"
+
+
 
     print(f"model is from {model_args.model_name_or_path}")
     print(f"data is from {data_args.dataset_name}")
-
     # logging 설정
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s -    %(message)s",
@@ -48,12 +55,17 @@ def main():
     # verbosity 설정 : Transformers logger의 정보로 사용합니다 (on main process only)
     logger.info("Training/evaluation parameters %s", training_args)
 
+    # wandb setting
+    os.environ['WANDB_LOG_MODEL'] = 'true'
+    os.environ['WANDB_WATCH'] = 'all'
+    os.environ['WANDB_SILENT'] = "true"
+
     # 모델을 초기화하기 전에 난수를 고정합니다.
     set_seed(training_args.seed)
 
     datasets = load_from_disk(data_args.dataset_name)
     print(datasets)
-
+    print(datasets['train'])
     # AutoConfig를 이용하여 pretrained model 과 tokenizer를 불러옵니다.
     # argument로 원하는 모델 이름을 설정하면 옵션을 바꿀 수 있습니다.
     config = AutoConfig.from_pretrained(
@@ -86,8 +98,10 @@ def main():
 
     # do_train mrc model 혹은 do_eval mrc model
     if training_args.do_train or training_args.do_eval:
+        #run = wandb.init(project = "MRC", name = 'valid Test')
+        #wandb.watch(run_mrc,log= 'all')
         run_mrc(data_args, training_args, model_args, datasets, tokenizer, model)
-
+        #run.finish()
 
 def run_mrc(
     data_args: DataTrainingArguments,
@@ -98,6 +112,9 @@ def run_mrc(
     model,
 ) -> NoReturn:
 
+    wandb.init(project="MRC",
+               name='valid_test',
+               reinit=True)
     # dataset을 전처리합니다.
     # training과 evaluation에서 사용되는 전처리는 아주 조금 다른 형태를 가집니다.
     if training_args.do_train:
@@ -118,7 +135,7 @@ def run_mrc(
         data_args, training_args, datasets, tokenizer
     )
 
-    # Train preprocessing / 전처리를 진행합니다.
+    # Train preprocessing / 전처리를 진행합니다. 
     def prepare_train_features(examples):
         # truncation과 padding(length가 짧을때만)을 통해 toknization을 진행하며, stride를 이용하여 overflow를 유지합니다.
         # 각 example들은 이전의 context와 조금씩 겹치게됩니다.
@@ -130,7 +147,7 @@ def run_mrc(
             stride=data_args.doc_stride,
             return_overflowing_tokens=True,
             return_offsets_mapping=True,
-            # return_token_type_ids=False, # roberta모델을 사용할 경우 False, bert를 사용할 경우 True로 표기해야합니다.
+            #return_token_type_ids=False, # roberta모델을 사용할 경우 False, bert를 사용할 경우 True로 표기해야합니다.
             padding="max_length" if data_args.pad_to_max_length else False,
         )
 
@@ -195,7 +212,7 @@ def run_mrc(
                     tokenized_examples["end_positions"].append(token_end_index + 1)
 
         return tokenized_examples
-
+    
     if training_args.do_train:
         if "train" not in datasets:
             raise ValueError("--do_train requires a train dataset")
@@ -222,7 +239,7 @@ def run_mrc(
             stride=data_args.doc_stride,
             return_overflowing_tokens=True,
             return_offsets_mapping=True,
-            # return_token_type_ids=False, # roberta모델을 사용할 경우 False, bert를 사용할 경우 True로 표기해야합니다.
+            #return_token_type_ids=False, # roberta모델을 사용할 경우 False, bert를 사용할 경우 True로 표기해야합니다.
             padding="max_length" if data_args.pad_to_max_length else False,
         )
 
@@ -295,10 +312,9 @@ def run_mrc(
             )
 
     metric = load_metric("squad")
-
     def compute_metrics(p: EvalPrediction):
         return metric.compute(predictions=p.predictions, references=p.label_ids)
-
+    
     # Trainer 초기화
     trainer = QuestionAnsweringTrainer(
         model=model,
@@ -309,15 +325,16 @@ def run_mrc(
         tokenizer=tokenizer,
         data_collator=data_collator,
         post_process_function=post_processing_function,
-        compute_metrics=compute_metrics,
+        compute_metrics=compute_metrics        
     )
 
     # Training
     if training_args.do_train:
+        # last_checkpoint가 없다면 checkpoint 등록
         if last_checkpoint is not None:
             checkpoint = last_checkpoint
-        elif os.path.isdir(model_args.model_name_or_path):
-            checkpoint = model_args.model_name_or_path
+        elif os.path.isdir(model_args.model_name_or_path): # dir이 존재하면
+            checkpoint = model_args.model_name_or_path # 현재 checkpoint
         else:
             checkpoint = None
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
@@ -342,16 +359,16 @@ def run_mrc(
         trainer.state.save_to_json(
             os.path.join(training_args.output_dir, "trainer_state.json")
         )
-
     # Evaluation
     if training_args.do_eval:
         logger.info("*** Evaluate ***")
         metrics = trainer.evaluate()
-
         metrics["eval_samples"] = len(eval_dataset)
 
         trainer.log_metrics("eval", metrics)
         trainer.save_metrics("eval", metrics)
+
+    wandb.join()
 
 
 if __name__ == "__main__":
