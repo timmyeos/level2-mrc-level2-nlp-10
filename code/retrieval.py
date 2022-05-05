@@ -49,6 +49,7 @@ class SparseRetrieval:
             Passage 파일을 불러오고 TfidfVectorizer를 선언하는 기능을 합니다.
         """
 
+        # 위키피디아 파일을 불러와서 text를 추출하고 순서대로 인덱스를 부여
         self.data_path = data_path
         with open(os.path.join(data_path, context_path), "r", encoding="utf-8") as f:
             wiki = json.load(f)
@@ -158,7 +159,8 @@ class SparseRetrieval:
                 Ground Truth가 있는 Query (train/valid) -> 기존 Ground Truth Passage를 같이 반환합니다.
                 Ground Truth가 없는 Query (test) -> Retrieval한 Passage만 반환합니다.
         """
-
+        # query_or_dataset :
+        # {'answers','context','document_id','id(mrc-..)','question','title'}
         assert self.p_embedding is not None, "get_sparse_embedding() 메소드를 먼저 수행해줘야합니다."
 
         if isinstance(query_or_dataset, str):
@@ -176,22 +178,27 @@ class SparseRetrieval:
             # Retrieve한 Passage를 pd.DataFrame으로 반환합니다.
             total = []
             with timer("query exhaustive search"):
+                # top_k score,인덱스 정보를 가져옴
+                # doc_scores : (num_query,top_k)
+                # doc_indices : (num_query,top_k)
                 doc_scores, doc_indices = self.get_relevant_doc_bulk(
                     query_or_dataset["question"], k=topk
                 )
+            # dataframe으로 변환
             for idx, example in enumerate(
                 tqdm(query_or_dataset, desc="Sparse retrieval: ")
             ):
                 tmp = {
                     # Query와 해당 id를 반환합니다.
                     "question": example["question"],
-                    "id": example["id"],
+                    "id": example["id"], # 예)'mrc-0-003264'
                     # Retrieve한 Passage의 id, context를 반환합니다.
-                    "context_id": doc_indices[idx],
-                    "context": " ".join(
+                    "context_id": doc_indices[idx], # doc_indices[0] = [10,153,15,..]
+                    "context": " ".join( # Top-k 문장을 하나로 합침 ['순천여자고..','소수의견에서..',..]
                         [self.contexts[pid] for pid in doc_indices[idx]]
                     ),
                 }
+                # train/validation 데이터의 경우 자료형 추가
                 if "context" in example.keys() and "answers" in example.keys():
                     # validation 데이터를 사용하면 ground_truth context와 answer도 반환합니다.
                     tmp["original_context"] = example["context"]
@@ -199,6 +206,10 @@ class SparseRetrieval:
                 total.append(tmp)
 
             cqas = pd.DataFrame(total)
+            # 반환값(test/validation 경우) :
+            # -> DataFrame{"question","id(dataset 내의 id'mrc-..')","context_id(추출context의 인덱스들)","context(하나로 합쳐진 Top-k 문장)"}
+            # 반환값(train/validation 경우 정답추가) : 
+            # -> 위에서 추가 {"original_context(query에 포함된 문장)", "answers"}
             return cqas
 
     def get_relevant_doc(self, query: str, k: Optional[int] = 1) -> Tuple[List, List]:
@@ -248,15 +259,15 @@ class SparseRetrieval:
             np.sum(query_vec) != 0
         ), "오류가 발생했습니다. 이 오류는 보통 query에 vectorizer의 vocab에 없는 단어만 존재하는 경우 발생합니다."
 
-        result = query_vec * self.p_embedding.T
+        result = query_vec * self.p_embedding.T # (num_query,num_context) = (num_query,emb_dim)*(emb_dim,num_context)
         if not isinstance(result, np.ndarray):
             result = result.toarray()
         doc_scores = []
         doc_indices = []
-        for i in range(result.shape[0]):
-            sorted_result = np.argsort(result[i, :])[::-1]
-            doc_scores.append(result[i, :][sorted_result].tolist()[:k])
-            doc_indices.append(sorted_result.tolist()[:k])
+        for i in range(result.shape[0]): # query 개수만큼 순회
+            sorted_result = np.argsort(result[i, :])[::-1] # 가장 큰 score 순서로 인덱스 정렬
+            doc_scores.append(result[i, :][sorted_result].tolist()[:k]) # top_k score 저장
+            doc_indices.append(sorted_result.tolist()[:k]) # top_k score의 인덱스 저장
         return doc_scores, doc_indices
 
     def retrieve_faiss(

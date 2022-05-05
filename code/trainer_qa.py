@@ -34,18 +34,25 @@ class QuestionAnsweringTrainer(Trainer):
         self.post_process_function = post_process_function
 
     def evaluate(self, eval_dataset=None, eval_examples=None, ignore_keys=None):
+        # eval_dataset :
+        # {'input_ids', 'token_type_ids', 'attention_mask', 'offset_mapping', 'example_id(dataset 내에서의 순서)'}
+        # eval_examples :
+        # {"answers","context(하나로 합쳐진 Top-k 문장)","id(dataset 내의 id'mrc-..')","question"}
+        print('evaluate 함수 실행..')
+        # reader model을 evaluate하기 위한 함수
         eval_dataset = self.eval_dataset if eval_dataset is None else eval_dataset
         eval_dataloader = self.get_eval_dataloader(eval_dataset)
         eval_examples = self.eval_examples if eval_examples is None else eval_examples
 
         # 일시적으로 metric computation를 불가능하게 한 상태이며, 해당 코드에서는 loop 내에서 metric 계산을 수행합니다.
         compute_metrics = self.compute_metrics
-        self.compute_metrics = None
+        self.compute_metrics = None # model predict 이후 matrics를 따로 계산하기 위함
         try:
             output = self.prediction_loop(
                 eval_dataloader,
                 description="Evaluation",
                 # metric이 없으면 예측값을 모으는 이유가 없으므로 아래의 코드를 따르게 됩니다.
+                # 하지만 evaluate를 할때 metrics를 계산하므로 loss만 계산하지는 않게됨.
                 # self.args.prediction_loss_only
                 prediction_loss_only=True if compute_metrics is None else None,
                 ignore_keys=ignore_keys,
@@ -60,6 +67,7 @@ class QuestionAnsweringTrainer(Trainer):
             )
 
         if self.post_process_function is not None and self.compute_metrics is not None:
+            # eval_preds : {id(dataset 내의 id'mrc-..'): 모델의 예상 정답 }
             eval_preds = self.post_process_function(
                 eval_examples, eval_dataset, output.predictions, self.args
             )
@@ -79,6 +87,11 @@ class QuestionAnsweringTrainer(Trainer):
         return metrics
 
     def predict(self, test_dataset, test_examples, ignore_keys=None):
+        # test_dataset : 
+        # {'input_ids', 'token_type_ids', 'attention_mask', 'offset_mapping', 'example_id(dataset 내에서의 순서)'}
+        # test_examples :
+        # {"context(하나로 합쳐진 Top-k 문장)","id(dataset 내의 id'mrc-..')","question"}
+        print('predict 함수실행..')
         test_dataloader = self.get_test_dataloader(test_dataset)
 
         # 일시적으로 metric computation를 불가능하게 한 상태이며, 해당 코드에서는 loop 내에서 metric 계산을 수행합니다.
@@ -109,4 +122,6 @@ class QuestionAnsweringTrainer(Trainer):
         predictions = self.post_process_function(
             test_examples, test_dataset, output.predictions, self.args
         )
+        # 반환값(predictions) :
+        # {'id(dataset 내의 id'mrc-..')','prediction_text'}
         return predictions

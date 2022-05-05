@@ -51,7 +51,7 @@ def main():
     # 모델을 초기화하기 전에 난수를 고정합니다.
     set_seed(training_args.seed)
 
-    datasets = load_from_disk(data_args.dataset_name)
+    datasets = load_from_disk(data_args.dataset_name) # default : train_dataset dir path
     print(datasets)
 
     # AutoConfig를 이용하여 pretrained model 과 tokenizer를 불러옵니다.
@@ -133,12 +133,17 @@ def run_mrc(
             # return_token_type_ids=False, # roberta모델을 사용할 경우 False, bert를 사용할 경우 True로 표기해야합니다.
             padding="max_length" if data_args.pad_to_max_length else False,
         )
+        # tokenized_examples :
+        # {'input_ids', 'token_type_ids', 'attention_mask', 'offset_mapping', 'overflow_to_sample_mapping'}
 
         # 길이가 긴 context가 등장할 경우 truncate를 진행해야하므로, 해당 데이터셋을 찾을 수 있도록 mapping 가능한 값이 필요합니다.
         sample_mapping = tokenized_examples.pop("overflow_to_sample_mapping")
         # token의 캐릭터 단위 position를 찾을 수 있도록 offset mapping을 사용합니다.
         # start_positions과 end_positions을 찾는데 도움을 줄 수 있습니다.
+        # offset_mappings으로 토큰이 원본 context 내 몇번째 글자부터 몇번째 글자까지 해당하는지 알 수 있음.
         offset_mapping = tokenized_examples.pop("offset_mapping")
+        # tokenized_examples :
+        # {'input_ids', 'token_type_ids', 'attention_mask', 'offset_mapping'<- deleted, 'overflow_to_sample_mapping'<- deleted}
 
         # 데이터셋에 "start position", "enc position" label을 부여합니다.
         tokenized_examples["start_positions"] = []
@@ -193,7 +198,7 @@ def run_mrc(
                     while offsets[token_end_index][1] >= end_char:
                         token_end_index -= 1
                     tokenized_examples["end_positions"].append(token_end_index + 1)
-
+        # {'input_ids', 'token_type_ids', 'attention_mask', 'start_positions'<- added, 'end_positions'<- added}
         return tokenized_examples
 
     if training_args.do_train:
@@ -247,6 +252,7 @@ def run_mrc(
                 (o if sequence_ids[k] == context_index else None)
                 for k, o in enumerate(tokenized_examples["offset_mapping"][i])
             ]
+        # {'input_ids', 'token_type_ids', 'attention_mask', 'offset_mapping'<- changed, 'example_id'<- added}
         return tokenized_examples
 
     if training_args.do_eval:
@@ -271,6 +277,7 @@ def run_mrc(
     # Post-processing:
     def post_processing_function(examples, features, predictions, training_args):
         # Post-processing: start logits과 end logits을 original context의 정답과 match시킵니다.
+        # predictions : {'example_id','text(텍스트 형태의 모델 예측값)'}
         predictions = postprocess_qa_predictions(
             examples=examples,
             features=features,
@@ -300,6 +307,12 @@ def run_mrc(
         return metric.compute(predictions=p.predictions, references=p.label_ids)
 
     # Trainer 초기화
+    # QuestionAnsweringTrainer에서 train 과정은 매직박스이며 데이터셋만 모델이 원하는 형태로 입력해주면된다.
+    # 단, eval 과정은 evaluate함수를 overriding하고 내부에서 compute_metric 함수를 호출해 커스텀하게 구현해야한다.
+    training_args.learning_rate = 3.00E-6
+    training_args.fp16 = True
+    training_args.num_train_epochs = 5
+
     trainer = QuestionAnsweringTrainer(
         model=model,
         args=training_args,

@@ -94,17 +94,25 @@ def postprocess_qa_predictions(
         is_world_process_zero (:obj:`bool`, `optional`, defaults to :obj:`True`):
             이 프로세스가 main process인지 여부(logging/save를 수행해야 하는지 여부를 결정하는 데 사용됨)
     """
+    # examples : {"context(하나로 합쳐진 Top-k 문장)","id(dataset 내의 id'mrc-..')","question"}
+    # features(eval_dataset) : {'input_ids', 'token_type_ids', 'attention_mask', 'offset_mapping', 'example_id(dataset 내에서의 순서)'}
+
+    # 모델의 예측값(predictions)은 튜플(start_logits, end_logits) 형태임
     assert (
         len(predictions) == 2
     ), "`predictions` should be a tuple with two elements (start_logits, end_logits)."
     all_start_logits, all_end_logits = predictions
 
+    # 예측값과 입력값의 데이터 개수가 같아야 한다
     assert len(predictions[0]) == len(
         features
     ), f"Got {len(predictions[0])} predictions and {len(features)} features."
 
-    # example과 mapping되는 feature 생성
+    # example(전치리전 데이터)과 mapping되는 feature(전처리 완료 데이터) 생성
+    # => example과 eval_dataset을 연결하는 작업
+    # dict{'example의 id': example의 내에서의 순서(index)}
     example_id_to_index = {k: i for i, k in enumerate(examples["id"])}
+    # dict{eval_dataset의 example_id가 위치한 example의 내에서의 순서(index):[eval_dataset 내에서의 순서(index)들(2개 이상가능)]}
     features_per_example = collections.defaultdict(list)
     for i, feature in enumerate(features):
         features_per_example[example_id_to_index[feature["example_id"]]].append(i)
@@ -112,7 +120,7 @@ def postprocess_qa_predictions(
     # prediction, nbest에 해당하는 OrderedDict 생성합니다.
     all_predictions = collections.OrderedDict()
     all_nbest_json = collections.OrderedDict()
-    if version_2_with_negative:
+    if version_2_with_negative: # 정답이 없는 경우
         scores_diff_json = collections.OrderedDict()
 
     # Logging.
@@ -124,12 +132,15 @@ def postprocess_qa_predictions(
     # 전체 example들에 대한 main Loop
     for example_index, example in enumerate(tqdm(examples)):
         # 해당하는 현재 example index
+        # 현재 example_id를 가진 eval_dataset의 index를 가져옴
         feature_indices = features_per_example[example_index]
 
         min_null_prediction = None
         prelim_predictions = []
 
-        # 현재 example에 대한 모든 feature 생성합니다.
+        # 현재 example에 대한 모든 feature('offsets','score','start_logit','end_logit') 생성합니다.
+        # 길이가 긴 example의 경우(동일한 example_id 가짐) 여러 문장으로 나누어 질수 있으므로..
+        # 동일한 example_id으로 만들어진 eval_dataset을 index(feature_index)를 이용해 순회함
         for feature_index in feature_indices:
             # 각 featureure에 대한 모든 prediction을 가져옵니다.
             start_logits = all_start_logits[feature_index]
@@ -155,12 +166,16 @@ def postprocess_qa_predictions(
                 }
 
             # `n_best_size`보다 큰 start and end logits을 살펴봅니다.
+            # 즉, 정답이 될 후보군을 만들기 위해 start,end logit을 각각 n_best_size 개수만큼 뽑음.
+            # 이떄 start,end logit을 큰값을 가진 순서대로 index로 정렬 후 n_best_size 개수 만큼 추출
             start_indexes = np.argsort(start_logits)[
                 -1 : -n_best_size - 1 : -1
             ].tolist()
 
             end_indexes = np.argsort(end_logits)[-1 : -n_best_size - 1 : -1].tolist()
 
+            # 위에서 뽑은 start,end의 모든 쌍에 대해 정답이 될수 있는지 살펴봄
+            # 후보로 가능한 것들은 feature('offsets','score','start_logit','end_logit')을 prelim_predictions 에 로 저장
             for start_index in start_indexes:
                 for end_index in end_indexes:
                     # out-of-scope answers는 고려하지 않습니다.
@@ -306,7 +321,7 @@ def postprocess_qa_predictions(
                 writer.write(
                     json.dumps(scores_diff_json, indent=4, ensure_ascii=False) + "\n"
                 )
-
+    # 반환값(all_predictions) : {id(dataset 내의 id'mrc-..'): 모델의 예상 정답 }
     return all_predictions
 
 
