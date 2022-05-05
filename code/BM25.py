@@ -4,6 +4,7 @@ import pickle
 import time
 from contextlib import contextmanager
 from typing import List, NoReturn, Optional, Tuple, Union
+import pprint
 
 import faiss
 import numpy as np
@@ -43,6 +44,7 @@ class BM25SparseRetrieval:
         tokenize_fn,
         data_path: Optional[str] = "../data/",
         context_path: Optional[str] = "wikipedia_documents.json",
+        ngram = 2
     ) -> NoReturn:
         # 위키피디아 파일을 불러와서 text를 추출하고 순서대로 인덱스를 부여
         self.data_path = data_path
@@ -57,13 +59,14 @@ class BM25SparseRetrieval:
         self.tokenize_fn = tokenize_fn
 
         self.bm25 = None  # get_bm_sparse_embedding()로 생성합니다
+        self.ngram = ngram
         self.indexer = None  # build_faiss()로 생성합니다.
 
     def get_sparse_embedding(self) -> NoReturn:
         # Pickle을 저장합니다.
         bm25_name = f"bm25.bin"
         bm25_path = os.path.join(self.data_path, bm25_name)
-
+        
         if os.path.isfile(bm25_path):
             with open(bm25_path, "rb") as file:
                 self.bm25 = pickle.load(file)
@@ -75,13 +78,15 @@ class BM25SparseRetrieval:
             for idx,text in enumerate(tqdm(self.contexts,desc="BM25 Sparse embedding")):
                 tmp = []
                 start = 0
+                tmp.extend(self.tokenize_fn(text[start:start+512]))
                 while start+512 <= len(text):
-                    if len(text[start:start+512])>512:
-                        print("*",idx,"line token length overflow !!!!!!")
-                    tmp.extend(self.tokenize_fn(text[start:start+512]))
                     start += 512
+                    tmp.extend(self.tokenize_fn(text[start:start+512]))
+                
+                assert self.ngram <= len(tmp), f"tokenized 된 길이가 ngram({self.ngram}) 보다 작습니다."
+                tmp.extend([''.join(tmp[i:i+self.ngram]) for i in range(len(tmp)-self.ngram+1)])
                 tokenized_contexts.append(tmp)
-
+            
             self.bm25 = BM25Okapi(tokenized_contexts)
             with open(bm25_path, "wb") as file:
                 pickle.dump(self.bm25, file)
@@ -142,8 +147,13 @@ class BM25SparseRetrieval:
         doc_scores = []
         doc_indices = []
         for query in tqdm(queries, desc=f"Top-k({k}) retrieval: "):
+            tmp = []
             tokenized_query = self.tokenize_fn(query)
-            scores,indices = self.bm25.get_top_n(tokenized_query, self.contexts, n=k)
+            tmp.extend(tokenized_query)
+            assert self.ngram <= len(tmp), f"tokenized 된 길이가 ngram({ngram}) 보다 작습니다."
+            tmp.extend([''.join(tmp[i:i+self.ngram]) for i in range(len(tmp)-self.ngram+1)])
+
+            scores,indices = self.bm25.get_top_n(tmp, self.contexts, n=k)
             doc_scores.append(scores)
             doc_indices.append(indices)
         
