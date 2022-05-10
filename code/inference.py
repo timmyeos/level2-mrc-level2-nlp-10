@@ -74,12 +74,24 @@ def main():
         if model_args.config_name
         else model_args.model_name_or_path,
     )
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_args.tokenizer_name
-        if model_args.tokenizer_name
-        else model_args.model_name_or_path,
+
+    tokenizer_inference = AutoTokenizer.from_pretrained(
+        model_args.model_name_or_path,
+        # 'use_fast' argument를 True로 설정할 경우 rust로 구현된 tokenizer를 사용할 수 있습니다.
+        # False로 설정할 경우 python으로 구현된 tokenizer를 사용할 수 있으며,
+        # rust version이 비교적 속도가 빠릅니다.
         use_fast=True,
     )
+    tokenizer_retrieval = AutoTokenizer.from_pretrained(
+        model_args.tokenizer_name
+        if model_args.tokenizer_name is not None
+        else model_args.model_name_or_path,
+        # 'use_fast' argument를 True로 설정할 경우 rust로 구현된 tokenizer를 사용할 수 있습니다.
+        # False로 설정할 경우 python으로 구현된 tokenizer를 사용할 수 있으며,
+        # rust version이 비교적 속도가 빠릅니다.
+        use_fast=True,
+    )
+
     model = AutoModelForQuestionAnswering.from_pretrained(
         model_args.model_name_or_path,
         from_tf=bool(".ckpt" in model_args.model_name_or_path),
@@ -87,14 +99,22 @@ def main():
     )
 
     # True일 경우 : run passage retrieval
+    # komora, kkma, hannanum, okt, mecab은 konlpy 내장 토크나이저
+    # 허깅페이스 토크나이저는 tokenizer_retrieval.tokenize 사용
     if data_args.eval_retrieval:
         datasets = run_sparse_retrieval(
-            tokenizer.tokenize, datasets, training_args, data_args,
+            tokenizer_retrieval.tokenize,  # huggingface tokenizer 불러올 때
+            # komoran, # mecab tokenizer 불러올 때
+            datasets,
+            training_args,
+            data_args,
         )
 
     # eval or predict mrc model
     if training_args.do_eval or training_args.do_predict:
-        run_mrc(data_args, training_args, model_args, datasets, tokenizer, model)
+        run_mrc(
+            data_args, training_args, model_args, datasets, tokenizer_inference, model
+        )
 
 
 def run_sparse_retrieval(
@@ -108,7 +128,11 @@ def run_sparse_retrieval(
 
     # Query에 맞는 Passage들을 Retrieval 합니다.
     retriever = SparseRetrieval(
-        tokenize_fn=tokenize_fn, data_path=data_path, context_path=context_path
+        tokenize_fn=tokenize_fn,
+        datasets=datasets,
+        data_args=data_args,
+        data_path=data_path,
+        context_path=context_path,
     )
     retriever.get_sparse_embedding()
 
@@ -188,7 +212,7 @@ def run_mrc(
             stride=data_args.doc_stride,
             return_overflowing_tokens=True,
             return_offsets_mapping=True,
-            # return_token_type_ids=False, # roberta모델을 사용할 경우 False, bert를 사용할 경우 True로 표기해야합니다.
+            return_token_type_ids=False,  # roberta모델을 사용할 경우 False, bert를 사용할 경우 True로 표기해야합니다.
             padding="max_length" if data_args.pad_to_max_length else False,
         )
 

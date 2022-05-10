@@ -11,6 +11,10 @@ import pandas as pd
 from datasets import Dataset, concatenate_datasets, load_from_disk
 from sklearn.feature_extraction.text import TfidfVectorizer
 from tqdm.auto import tqdm
+from preprocess import preprocess
+from transformers import AutoTokenizer
+from tqdm.auto import tqdm
+from dpr import dpr, p_emd, q_emd
 
 
 @contextmanager
@@ -24,6 +28,8 @@ class SparseRetrieval:
     def __init__(
         self,
         tokenize_fn,
+        datasets,
+        data_args,
         data_path: Optional[str] = "../data/",
         context_path: Optional[str] = "wikipedia_documents.json",
     ) -> NoReturn:
@@ -48,24 +54,48 @@ class SparseRetrieval:
         Summary:
             Passage 파일을 불러오고 TfidfVectorizer를 선언하는 기능을 합니다.
         """
-
+        self.data_args = data_args
         self.data_path = data_path
         with open(os.path.join(data_path, context_path), "r", encoding="utf-8") as f:
             wiki = json.load(f)
 
-        self.contexts = list(
-            dict.fromkeys([v["text"] for v in wiki.values()])
-        )  # set 은 매번 순서가 바뀌므로
+        self.contexts = list(dict.fromkeys([v["text"] for v in wiki.values()]))
+        # set 은 매번 순서가 바뀌므로
         print(f"Lengths of unique contexts : {len(self.contexts)}")
         self.ids = list(range(len(self.contexts)))
 
         # Transform by vectorizer
         self.tfidfv = TfidfVectorizer(
-            tokenizer=tokenize_fn, ngram_range=(1, 2), max_features=50000,
+            tokenizer=tokenize_fn,
+            ngram_range=(1, 2),
+            max_features=50000,
         )
 
         self.p_embedding = None  # get_sparse_embedding()로 생성합니다
         self.indexer = None  # build_faiss()로 생성합니다.
+
+        self.datasets = datasets
+
+        self.datasets_train = self.datasets["train"]
+        self.datasets_valid = self.datasets["validation"]
+        if self.data_args.use_preprocess:
+            for idx in tqdm(range(len(self.contexts))):
+                self.contexts[idx] = preprocess(self.contexts[idx])
+            for idx in tqdm(range(len(self.datasets_train))):
+                self.datasets_train[idx]["context"] = preprocess(
+                    self.datasets_train[idx]["context"]
+                )
+            for idx in tqdm(range(len(self.datasets_valid))):
+                self.datasets_valid[idx]["context"] = preprocess(
+                    self.datasets_valid[idx]["context"]
+                )
+        print("DPR용 훈련/검증/위키데이터 전처리 완료")
+
+        if self.data_args.use_faiss:
+            self.p_encoder, self.q_encoder = dpr(
+                self.datasets_train, self.datasets_valid, self.contexts
+            )
+            self.p_embedding = p_emd(self.p_encoder, self.contexts)
 
     def get_sparse_embedding(self) -> NoReturn:
 
@@ -90,12 +120,14 @@ class SparseRetrieval:
             print("Embedding pickle load.")
         else:
             print("Build passage embedding")
-            self.p_embedding = self.tfidfv.fit_transform(self.contexts)
+            if self.data_args.use_faiss is False:
+                self.p_embedding = self.tfidfv.fit_transform(self.contexts)
             print(self.p_embedding.shape)
             with open(emd_path, "wb") as file:
                 pickle.dump(self.p_embedding, file)
-            with open(tfidfv_path, "wb") as file:
-                pickle.dump(self.tfidfv, file)
+            if self.data_args.use_faiss is False:
+                with open(tfidfv_path, "wb") as file:
+                    pickle.dump(self.tfidfv, file)
             print("Embedding pickle saved.")
 
     def build_faiss(self, num_clusters=64) -> NoReturn:
@@ -368,7 +400,11 @@ class SparseRetrieval:
             vocab 에 없는 이상한 단어로 query 하는 경우 assertion 발생 (예) 뙣뙇?
         """
 
-        query_vecs = self.tfidfv.transform(queries)
+        print("bulk_faiss 시작")
+        if self.data_args.use_faiss:
+            query_vecs = q_emd(self.q_encoder, queries)
+        else:
+            query_vecs = self.tfidfv.transform(queries)
         assert (
             np.sum(query_vecs) != 0
         ), "오류가 발생했습니다. 이 오류는 보통 query에 vectorizer의 vocab에 없는 단어만 존재하는 경우 발생합니다."
@@ -412,14 +448,16 @@ if __name__ == "__main__":
     print("*" * 40, "query dataset", "*" * 40)
     print(full_ds)
 
-    from transformers import AutoTokenizer
-
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=False,)
+    tokenizer = AutoTokenizer.from_pretrained(
+        args.model_name_or_path,
+        use_fast=True,
+    )
 
     retriever = SparseRetrieval(
         tokenize_fn=tokenizer.tokenize,
         data_path=args.data_path,
         context_path=args.context_path,
+        datasets=datasets,
     )
 
     query = "대통령을 포함한 미국의 행정부 견제권을 갖는 국가 기관은?"

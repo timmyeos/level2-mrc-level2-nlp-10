@@ -2,7 +2,6 @@ import logging
 import os
 import sys
 from typing import NoReturn
-
 from arguments import DataTrainingArguments, ModelArguments
 from datasets import DatasetDict, load_from_disk, load_metric
 from trainer_qa import QuestionAnsweringTrainer
@@ -17,6 +16,7 @@ from transformers import (
     set_seed,
 )
 from utils_qa import check_no_error, postprocess_qa_predictions
+
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,12 @@ def main():
 
     print(f"model is from {model_args.model_name_or_path}")
     print(f"data is from {data_args.dataset_name}")
+
+    training_args.num_train_epochs = 10
+    training_args.learning_rate = 3.00e-05
+    training_args.fp16 = True
+    # training_args.per_device_train_batch_size = 16
+    # training_args.per_device_eval_batch_size = 16
 
     # logging 설정
     logging.basicConfig(
@@ -61,6 +67,7 @@ def main():
         if model_args.config_name is not None
         else model_args.model_name_or_path,
     )
+
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.tokenizer_name
         if model_args.tokenizer_name is not None
@@ -70,12 +77,14 @@ def main():
         # rust version이 비교적 속도가 빠릅니다.
         use_fast=True,
     )
+
     model = AutoModelForQuestionAnswering.from_pretrained(
         model_args.model_name_or_path,
-        from_tf=bool(".ckpt" in model_args.model_name_or_path),
+        # from_tf=bool(".ckpt" in model_args.model_name_or_path),
         config=config,
     )
 
+    print(model)
     print(
         type(training_args),
         type(model_args),
@@ -130,7 +139,7 @@ def run_mrc(
             stride=data_args.doc_stride,
             return_overflowing_tokens=True,
             return_offsets_mapping=True,
-            # return_token_type_ids=False, # roberta모델을 사용할 경우 False, bert를 사용할 경우 True로 표기해야합니다.
+            return_token_type_ids=False,  # roberta모델을 사용할 경우 False, bert를 사용할 경우 True로 표기해야합니다.
             padding="max_length" if data_args.pad_to_max_length else False,
         )
 
@@ -222,7 +231,7 @@ def run_mrc(
             stride=data_args.doc_stride,
             return_overflowing_tokens=True,
             return_offsets_mapping=True,
-            # return_token_type_ids=False, # roberta모델을 사용할 경우 False, bert를 사용할 경우 True로 표기해야합니다.
+            return_token_type_ids=False,  # roberta모델을 사용할 경우 False, bert를 사용할 경우 True로 표기해야합니다.
             padding="max_length" if data_args.pad_to_max_length else False,
         )
 
@@ -320,7 +329,9 @@ def run_mrc(
             checkpoint = model_args.model_name_or_path
         else:
             checkpoint = None
+
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
+        # train_result = trainer.train()
         trainer.save_model()  # Saves the tokenizer too for easy upload
 
         metrics = train_result.metrics
