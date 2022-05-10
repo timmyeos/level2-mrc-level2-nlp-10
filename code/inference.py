@@ -15,6 +15,9 @@ Open-Domain Question Answering 을 수행하는 inference 코드 입니다.
 #                     --model_name_or_path ./models/train_dataset/ 
 #                     --do_predict
 
+# dense_retrieval eval 명령어
+# python inference.py --output_dir ./outputs/val_Dataset_dense/ --dataset_name ../data/train_dataset/ --model_name_or_path ./models/train_dataset/ --do_eval --overwrite_output_dir
+
 import logging
 import sys
 from typing import Callable, Dict, List, NoReturn, Tuple
@@ -32,6 +35,7 @@ from datasets import (
 )
 from retrieval import SparseRetrieval
 from BM25 import BM25SparseRetrieval
+from dense_retrieval import DenseRetrival, BertEncoder
 # import torch
 from trainer_qa import QuestionAnsweringTrainer
 from transformers import (
@@ -124,8 +128,11 @@ def main():
         # {'validation':{"context(하나로 합쳐진 Top-k 문장)","id(dataset 내의 id'mrc-..')","question"}}
         # datasets(do_eval) :
         # {'validation':{"answers","context(하나로 합쳐진 Top-k 문장)","id(dataset 내의 id'mrc-..')","question"}}
-        datasets = run_sparse_retrieval(
-            tokenizer.tokenize, datasets, training_args, data_args,
+        # datasets = run_sparse_retrieval(
+        #     tokenizer.tokenize, datasets, training_args, data_args,
+        # )
+        datasets = run_dense_retrieval(
+            datasets, training_args, data_args,
         )
 
     # eval or predict mrc model
@@ -200,6 +207,71 @@ def run_sparse_retrieval(
     datasets = DatasetDict({"validation": Dataset.from_pandas(df, features=f)})
     return datasets
 
+def run_dense_retrieval(
+    # tokenize_fn: Callable[[str], List[str]],
+    datasets: DatasetDict,
+    training_args: TrainingArguments,
+    data_args: DataTrainingArguments,
+    data_path: str = "../data",
+    # context_path: str = "wikipedia_documents.json",
+) -> DatasetDict:
+    # datasets['validation'] :
+    # {'answers','context','document_id','id(dataset 내의 id'mrc-..')','question','title'}
+
+    # Query에 맞는 Passage들을 Retrieval 합니다.
+    retriever = DenseRetrival(
+        data_path=data_path, 
+        encoder_model_path = "./encoder_model"
+    )
+    retriever.get_dense_embedding()
+
+    if data_args.use_faiss: # default(False)
+        assert True, 'faiss 기능 추후 구현예정..'
+        # retriever.build_faiss(num_clusters=data_args.num_clusters)
+        # df = retriever.retrieve_faiss(
+        #     datasets["validation"], topk=data_args.top_k_retrieval
+        # )
+    else: # default(Tfidf, Top-k)
+        # df(do_predic) (test/validation 경우) :
+        # -> DataFrame{"question","id(dataset 내의 id'mrc-..')","context_id(추출context의 인덱스들)","context(하나로 합쳐진 Top-k 문장)"}
+        # df(do_eval) (train/validation 경우 정답추가) : 
+        # -> 위에서 추가 {"original_context(원래 dataset에 포함된 문장)", "answers"}
+        df = retriever.retrieve(datasets["validation"], topk=data_args.top_k_retrieval)
+
+    # DataSet 자료형으로 변환하기 위해 Features 자료형 생성
+    # test data 에 대해선 정답이 없으므로 id question context 로만 데이터셋이 구성됩니다.
+    if training_args.do_predict:
+        f = Features(
+            {
+                "context": Value(dtype="string", id=None),
+                "id": Value(dtype="string", id=None),
+                "question": Value(dtype="string", id=None),
+            }
+        )
+
+    # train data 에 대해선 정답이 존재하므로 id question context answer 로 데이터셋이 구성됩니다.
+    elif training_args.do_eval:
+        f = Features(
+            {
+                "answers": Sequence(
+                    feature={
+                        "text": Value(dtype="string", id=None),
+                        "answer_start": Value(dtype="int32", id=None),
+                    },
+                    length=-1,
+                    id=None,
+                ),
+                "context": Value(dtype="string", id=None),
+                "id": Value(dtype="string", id=None),
+                "question": Value(dtype="string", id=None),
+            }
+        )
+    # 반환값(do_predict) :
+    # {'validation':{"context(하나로 합쳐진 Top-k 문장)","id(dataset 내의 id'mrc-..')","question"}}
+    # 반환값(do_eval) :
+    # {'validation':{"answers","context(하나로 합쳐진 Top-k 문장)","id(dataset 내의 id'mrc-..')","question"}}
+    datasets = DatasetDict({"validation": Dataset.from_pandas(df, features=f)})
+    return datasets
 
 def run_mrc(
     data_args: DataTrainingArguments,
