@@ -33,6 +33,8 @@ class DataTrainingArguments:
     """
     Arguments pertaining to what data we are going to input our model for training and eval.
     """
+    dataset_path: Optional[str] = field(
+        default = "/opt/ml/branch_main/level2-mrc-level2-nlp-10/data/")
 
     dataset_name: Optional[str] = field(
         default="../data/train_dataset",
@@ -90,3 +92,29 @@ class DataTrainingArguments:
     use_faiss: bool = field(
         default=False, metadata={"help": "Whether to build with faiss"}
     )
+
+@dataclass
+class RetrieverArguments :
+
+    Retriever_type: str = field(default = 'Dense Passage Retriever')
+    
+    dpr_top_k: int = field(
+        default = 5)
+
+    dpr_model: str = field(
+        default="klue/bert-base")
+
+    dpr_learning_rate: float = field(
+        default = 3e-6)
+    
+    dpr_train_batch: int = field(default = 8)
+
+    dpr_eval_batch: int = field(default = 8)
+
+    dpr_weight_decay: int = field(default = 0.01)
+
+    dpr_epochs: int = field(default = 5)
+    
+    dpr_eval_steps: int = field(default = 200)
+
+    retriever_dir: str = field(default = './models/retriever')
