@@ -93,7 +93,10 @@ class BM25SparseRetrieval:
             print("BM25 pickle saved.")
 
     def retrieve(
-        self, query_or_dataset: Union[str, Dataset], topk: Optional[int] = 1
+        self, 
+        query_or_dataset: Union[str, Dataset], 
+        topk: Optional[int] = 1,
+        get_scores = False
     ) -> Union[Tuple[List, List], pd.DataFrame]:
         # query_or_dataset :
         # {'answers','context','document_id','id(mrc-..)','question','title'}
@@ -108,9 +111,16 @@ class BM25SparseRetrieval:
                 # top_k score,인덱스 정보를 가져옴
                 # doc_scores : (num_query,top_k)
                 # doc_indices : (num_query,top_k)
-                doc_scores, doc_indices = self.get_relevant_doc_bulk(
-                    query_or_dataset["question"], k=topk
-                )
+                if get_scores:
+                    doc_scores, doc_indices = self.get_relevant_doc_bulk(
+                        query_or_dataset["question"], k=2000
+                    )
+                else:
+                    doc_scores, doc_indices = self.get_relevant_doc_bulk(
+                        query_or_dataset["question"], k=topk
+                    )
+            if get_scores:
+                return doc_scores, doc_indices
 
             # dataframe으로 변환
             for idx, example in enumerate(
@@ -151,7 +161,8 @@ class BM25SparseRetrieval:
             tokenized_query = self.tokenize_fn(query)
             tmp.extend(tokenized_query)
             assert self.ngram <= len(tmp), f"tokenized 된 길이가 ngram({ngram}) 보다 작습니다."
-            tmp.extend([''.join(tmp[i:i+self.ngram]) for i in range(len(tmp)-self.ngram+1)])
+            for num_ngram in range(2,self.ngram+1):
+                tmp.extend([''.join(tokenized_query[i:i+num_ngram]) for i in range(len(tokenized_query)-num_ngram+1)])
 
             scores,indices = self.bm25.get_top_n(tmp, self.contexts, n=k)
             doc_scores.append(scores)
