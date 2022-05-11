@@ -88,9 +88,25 @@ class DataTrainingArguments:
         },
     )
     use_faiss: bool = field(
-        default=True, metadata={"help": "Whether to build with faiss"}
+        default=False, metadata={"help": "Whether to build with faiss"}
     )
     use_preprocess: bool = field(
         default=True,
         metadata={"help": "Whether to preprocess datasets(train/val/wiki)"},
+    )
+    use_parasplit: bool = field(
+        default=True,
+        metadata={"help": "Whether to split passages into paragraphs)"},
+    )
+    use_tf: bool = field(
+        default=True,
+        metadata={"help": "Whether to use tf-idf)"},
+    )
+    use_bm: bool = field(
+        default=True,
+        metadata={"help": "Whether to use bm25)"},
+    )
+    use_dpr: bool = field(
+        default=True,
+        metadata={"help": "Whether to use dpr)"},
     )

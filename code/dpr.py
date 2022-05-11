@@ -17,23 +17,24 @@ from transformers.models.roberta.modeling_roberta import (
 )
 
 
-def neg_sampling(dataset, wikiset, num_neg):
-    # dataset = np.array(dataset)
-    wikiset = np.array(wikiset)
-    p_with_neg = []
+# def neg_sampling(dataset, wikiset, num_neg):
+#     # dataset = np.array(dataset)
+#     wikiset = np.array(wikiset)
+#     p_with_neg = []
 
-    for c in tqdm(dataset):
-        # print(c)
-        while True:
-            neg_idxs = np.random.randint(len(wikiset), size=num_neg)
-            # print(wikiset[neg_idxs])
-            if c not in wikiset[neg_idxs]:
-                p_neg = wikiset[neg_idxs]
+#     for c in tqdm(dataset):
+#         # print(c)
+#         while True:
+#             neg_idxs = np.random.randint(len(wikiset), size=num_neg)
+#             # print(wikiset[neg_idxs])
+#             if c not in wikiset[neg_idxs]:
+#                 p_neg = wikiset[neg_idxs]
 
-                p_with_neg.append(c)
-                p_with_neg.extend(p_neg)
-                break
-    return p_with_neg
+#                 p_with_neg.append(c)
+#                 p_with_neg.extend(p_neg)
+#                 break
+#     print("neg_sampling done")
+#     return p_with_neg
 
 
 def dataset_func(tokenizer, dataset, wikiset, num_neg):
@@ -41,29 +42,32 @@ def dataset_func(tokenizer, dataset, wikiset, num_neg):
         dataset["question"],
         padding="max_length",
         truncation=True,
+        return_token_type_ids=False,
         return_tensors="pt",
     )
-    p_with_neg = neg_sampling(dataset["context"], wikiset, num_neg)
+    # p_with_neg = neg_sampling(dataset["context"], wikiset, num_neg)
     p_seqs = tokenizer(
-        p_with_neg, padding="max_length", truncation=True, return_tensors="pt"
+        dataset["context"],
+        padding="max_length",
+        truncation=True,
+        return_token_type_ids=False,
+        return_tensors="pt",
     )
 
-    max_len = p_seqs["input_ids"].size(-1)
-    p_seqs["input_ids"] = p_seqs["input_ids"].view(-1, num_neg + 1, max_len)
-    p_seqs["attention_mask"] = p_seqs["attention_mask"].view(-1, num_neg + 1, max_len)
-    p_seqs["token_type_ids"] = p_seqs["token_type_ids"].view(-1, num_neg + 1, max_len)
+    # max_len = p_seqs["input_ids"].size(-1)
+    # p_seqs["input_ids"] = p_seqs["input_ids"].view(-1, num_neg + 1, max_len)
+    # p_seqs["attention_mask"] = p_seqs["attention_mask"].view(-1, num_neg + 1, max_len)
+    # p_seqs["token_type_ids"] = p_seqs["token_type_ids"].view(-1, num_neg + 1, max_len)
 
-    print(
-        "DPR p_seqs size: ", p_seqs["input_ids"].size()
-    )  # (num_example, pos + neg, max_len)
+    print("DPR p_seqs size: ", p_seqs["input_ids"].size())
 
     train_dataset = TensorDataset(
         p_seqs["input_ids"],
         p_seqs["attention_mask"],
-        p_seqs["token_type_ids"],
+        # p_seqs["token_type_ids"],
         q_seqs["input_ids"],
         q_seqs["attention_mask"],
-        q_seqs["token_type_ids"],
+        # q_seqs["token_type_ids"],
     )
 
     return train_dataset
@@ -76,10 +80,12 @@ class RobertaEncoder(RobertaPreTrainedModel):
         self.bert = RobertaModel(config)
         self.init_weights()
 
-    def forward(self, input_ids, attention_mask=None, token_type_ids=None):
+    def forward(self, input_ids, attention_mask=None):
 
         outputs = self.bert(
-            input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids
+            input_ids,
+            attention_mask=attention_mask,
+            # token_type_ids=token_type_ids
         )
 
         pooled_output = outputs[1]
@@ -90,27 +96,19 @@ class RobertaEncoder(RobertaPreTrainedModel):
 args = TrainingArguments(
     output_dir="dense_retireval",
     evaluation_strategy="epoch",
-    learning_rate=3e-5,
-    per_device_train_batch_size=4,
-    per_device_eval_batch_size=4,
-    num_train_epochs=10,
+    learning_rate=1e-5,
+    per_device_train_batch_size=2,
+    per_device_eval_batch_size=2,
+    num_train_epochs=1,
     weight_decay=0.01,
+    # fp16=True,
 )
 
 
 def train(args, num_neg, dataset, model_checkpoint):
     # p,q model
-    config = AutoConfig.from_pretrained(model_checkpoint)
-    p_model = AutoModel.from_pretrained(
-        model_checkpoint,
-        from_tf=bool(".ckpt" in model_checkpoint),
-        config=config,
-    )
-    q_model = AutoModel.from_pretrained(
-        model_checkpoint,
-        from_tf=bool(".ckpt" in model_checkpoint),
-        config=config,
-    )
+    p_model = RobertaEncoder.from_pretrained(model_checkpoint)
+    q_model = RobertaEncoder.from_pretrained(model_checkpoint)
 
     if torch.cuda.is_available():
         p_model.cuda()
@@ -186,46 +184,33 @@ def train(args, num_neg, dataset, model_checkpoint):
             q_model.train()
             p_model.train()
 
-            targets = torch.zeros(args.per_device_train_batch_size).long()
             if torch.cuda.is_available():
                 batch = tuple(t.cuda() for t in batch)
-                targets = targets.cuda()
 
-            p_inputs = {
-                "input_ids": batch[0].view(
-                    args.per_device_train_batch_size * (num_neg + 1), -1
-                ),
-                "attention_mask": batch[1].view(
-                    args.per_device_train_batch_size * (num_neg + 1), -1
-                ),
-                "token_type_ids": batch[2].view(
-                    args.per_device_train_batch_size * (num_neg + 1), -1
-                ),
-            }
+            p_inputs = {"input_ids": batch[0], "attention_mask": batch[1]}
 
             q_inputs = {
-                "input_ids": batch[3],
-                "attention_mask": batch[4],
-                "token_type_ids": batch[5],
+                "input_ids": batch[2],
+                "attention_mask": batch[3],
             }
 
             p_outputs = p_model(**p_inputs)  # (batch_size*(num_neg+1), emb_dim)
             q_outputs = q_model(**q_inputs)  # (batch_size*, emb_dim)
 
             # Calculate similarity score & loss
-            p_outputs = p_outputs.view(
-                args.per_device_train_batch_size, -1, num_neg + 1
-            )
-            q_outputs = q_outputs.view(args.per_device_train_batch_size, 1, -1)
+            sim_scores = torch.matmul(q_outputs, torch.transpose(p_outputs, 0, 1))
+            # (batch_size, emb_dim) x (emb_dim, batch_size) = (batch_size, batch_size)
 
-            sim_scores = torch.bmm(
-                q_outputs, p_outputs
-            ).squeeze()  # (batch_size, num_neg+1)
-            sim_scores = sim_scores.view(args.per_device_train_batch_size, -1)
+            # target: position of positive samples = diagonal element
+            targets = torch.arange(0, args.per_device_train_batch_size).long()
+            if torch.cuda.is_available():
+                targets = targets.to("cuda")
+
             sim_scores = F.log_softmax(sim_scores, dim=1)
-
             loss = F.nll_loss(sim_scores, targets)
-            print(loss)
+
+            if global_step % 500 == 0:
+                print(loss)
 
             loss.backward()
             optimizer.step()
@@ -239,8 +224,8 @@ def train(args, num_neg, dataset, model_checkpoint):
     return p_model, q_model
 
 
-def dpr(dataset_train, dataset_val, wikiset):
-    model_checkpoint = "monologg/koelectra-base-v3-finetuned-korquad"
+def dpr(dataset_train, wikiset):
+    model_checkpoint = "klue/roberta-base"
     tokenizer = AutoTokenizer.from_pretrained(
         model_checkpoint,
         # 'use_fast' argument를 True로 설정할 경우 rust로 구현된 tokenizer를 사용할 수 있습니다.
@@ -248,16 +233,17 @@ def dpr(dataset_train, dataset_val, wikiset):
         # rust version이 비교적 속도가 빠릅니다.
         use_fast=True,
     )
-    num_neg = 7
+    num_neg = 15
 
     train_dataset = dataset_func(tokenizer, dataset_train, wikiset, num_neg)
     p_encoder, q_encoder = train(args, num_neg, train_dataset, model_checkpoint)
-
+    p_encoder.save_pretrained("./p_encoder")
+    q_encoder.save_pretrained("./q_encoder")
     return p_encoder, q_encoder
 
 
 def p_emd(p_encoder, wikiset):
-    model_checkpoint = "monologg/koelectra-base-v3-finetuned-korquad"
+    model_checkpoint = "klue/roberta-base"
     tokenizer = AutoTokenizer.from_pretrained(
         model_checkpoint,
         # 'use_fast' argument를 True로 설정할 경우 rust로 구현된 tokenizer를 사용할 수 있습니다.
@@ -271,7 +257,11 @@ def p_emd(p_encoder, wikiset):
         p_embs = []
         for p in wikiset:
             p = tokenizer(
-                p, padding="max_length", truncation=True, return_tensors="pt"
+                p,
+                padding="max_length",
+                truncation=True,
+                return_token_type_ids=False,
+                return_tensors="pt",
             ).to("cuda")
             p_emb = p_encoder(**p).to("cpu").numpy()
             p_embs.append(p_emb)
@@ -282,7 +272,7 @@ def p_emd(p_encoder, wikiset):
 
 
 def q_emd(q_encoder, queries):
-    model_checkpoint = "monologg/koelectra-base-v3-finetuned-korquad"
+    model_checkpoint = "klue/roberta-base"
     tokenizer = AutoTokenizer.from_pretrained(
         model_checkpoint,
         # 'use_fast' argument를 True로 설정할 경우 rust로 구현된 tokenizer를 사용할 수 있습니다.
@@ -294,7 +284,11 @@ def q_emd(q_encoder, queries):
         q_encoder.eval()
 
         q_seqs_val = tokenizer(
-            queries, padding="max_length", truncation=True, return_tensors="pt"
+            queries,
+            padding="max_length",
+            truncation=True,
+            return_token_type_ids=False,
+            return_tensors="pt",
         ).to("cuda")
         q_embs = q_encoder(**q_seqs_val).to("cpu")  # (num_query, emb_dim)
         print("q_embs size: ", q_embs.size())

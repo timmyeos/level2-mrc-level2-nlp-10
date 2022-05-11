@@ -4,7 +4,7 @@ import pickle
 import time
 from contextlib import contextmanager
 from typing import List, NoReturn, Optional, Tuple, Union
-
+import torch
 import faiss
 import numpy as np
 import pandas as pd
@@ -13,8 +13,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from tqdm.auto import tqdm
 from preprocess import preprocess
 from transformers import AutoTokenizer
-from tqdm.auto import tqdm
 from dpr import dpr, p_emd, q_emd
+from BM25 import BM25Okapi
 
 
 @contextmanager
@@ -59,79 +59,161 @@ class SparseRetrieval:
         with open(os.path.join(data_path, context_path), "r", encoding="utf-8") as f:
             wiki = json.load(f)
 
-        self.contexts = list(dict.fromkeys([v["text"] for v in wiki.values()]))
+        contexts = list(dict.fromkeys([v["text"] for v in wiki.values()]))
         # set 은 매번 순서가 바뀌므로
-        print(f"Lengths of unique contexts : {len(self.contexts)}")
-        self.ids = list(range(len(self.contexts)))
+        print(f"Lengths of unique contexts : {len(contexts)}")
+        self.ids = list(range(len(contexts)))
+        self.tokenize_fn = tokenize_fn
 
-        # Transform by vectorizer
-        self.tfidfv = TfidfVectorizer(
-            tokenizer=tokenize_fn,
-            ngram_range=(1, 2),
-            max_features=50000,
-        )
+        self.p_embedding_dpr = None
+        self.p_embedding_sparse = None
+        self.p_embedding_bm = None
+        # get_sparse_embedding()로 생성합니다
+        # dpr, tf, bm 중 선택해서 생성합니다.
 
-        self.p_embedding = None  # get_sparse_embedding()로 생성합니다
+        self.ngram = 2  # bm25 용 ngram parameter
         self.indexer = None  # build_faiss()로 생성합니다.
-
         self.datasets = datasets
-
-        self.datasets_train = self.datasets["train"]
-        self.datasets_valid = self.datasets["validation"]
+        # self.datasets_train = self.datasets["validation"]
+        # self.datasets_valid = self.datasets["validation"]
         if self.data_args.use_preprocess:
-            for idx in tqdm(range(len(self.contexts))):
-                self.contexts[idx] = preprocess(self.contexts[idx])
-            for idx in tqdm(range(len(self.datasets_train))):
-                self.datasets_train[idx]["context"] = preprocess(
-                    self.datasets_train[idx]["context"]
-                )
-            for idx in tqdm(range(len(self.datasets_valid))):
-                self.datasets_valid[idx]["context"] = preprocess(
-                    self.datasets_valid[idx]["context"]
-                )
-        print("DPR용 훈련/검증/위키데이터 전처리 완료")
+            if self.data_args.use_parasplit:
+                para_num_limit = 4  # 문단 별 최소 문장 개수
+                para_len_limit = 15  # 문단 별 최소 길이
+                contexts_2 = []
+                tmp_para = ""
 
-        if self.data_args.use_faiss:
-            self.p_encoder, self.q_encoder = dpr(
-                self.datasets_train, self.datasets_valid, self.contexts
-            )
-            self.p_embedding = p_emd(self.p_encoder, self.contexts)
+                for text in tqdm(contexts):
+                    tmp = text.split("\n")
+                    tmp_para = ""
+                    cnt = 0
+                    for data in tmp:
+                        if data != "":
+                            cnt += 1
+                            if preprocess(data) + " " != " ":
+                                tmp_para += preprocess(data) + " "
+                            if cnt % para_num_limit == 0:
+                                if len(tmp_para) > para_len_limit:
+                                    contexts_2.append(tmp_para)
+                                    tmp_para = ""
+                    if tmp_para != "" and len(tmp_para) > para_len_limit:
+                        contexts_2.append(tmp_para)
+                self.contexts = contexts_2
+                for data in self.contexts:
+                    if data == "":
+                        print("공백이들어감.")
+                print("문장분리 후 위키데이터 길이: ", len(self.contexts))
+            else:
+                self.contexts = datasets
+                for idx in tqdm(range(len(self.contexts))):
+                    self.contexts[idx] = preprocess(self.contexts[idx])
+                print("전처리 후 위키데이터길이: ", len(self.contexts))
+        #     for idx in tqdm(range(len(self.datasets_train))):
+        #         self.datasets_train[idx]["context"] = preprocess(
+        #             self.datasets_train[idx]["context"]
+        #         )
+        #     for idx in tqdm(range(len(self.datasets_valid))):
+        #         self.datasets_valid[idx]["context"] = preprocess(
+        #             self.datasets_valid[idx]["context"]
+        #         )
+
+        #     print("훈련/검증/위키데이터 전처리 완료")
 
     def get_sparse_embedding(self) -> NoReturn:
 
         """
         Summary:
-            Passage Embedding을 만들고
-            TFIDF와 Embedding을 pickle로 저장합니다.
+            DPR, Sparse+TFIDF, BM25 Embedding을 만들고
+            TFIDF와 각 Embedding을 pickle로 저장합니다.
             만약 미리 저장된 파일이 있으면 저장된 pickle을 불러옵니다.
         """
 
         # Pickle을 저장합니다.
-        pickle_name = f"sparse_embedding.bin"
+        dpr_name = f"dense_embedding_inbatch(bert 40epoch).bin"
+        sparse_name = f"sparse.bin"
         tfidfv_name = f"tfidv.bin"
-        emd_path = os.path.join(self.data_path, pickle_name)
-        tfidfv_path = os.path.join(self.data_path, tfidfv_name)
+        bm25_name = f"bm25.bin"
 
-        if os.path.isfile(emd_path) and os.path.isfile(tfidfv_path):
-            with open(emd_path, "rb") as file:
-                self.p_embedding = pickle.load(file)
+        dpr_path = os.path.join(self.data_path, dpr_name)
+        sparse_path = os.path.join(self.data_path, sparse_name)
+        tfidfv_path = os.path.join(self.data_path, tfidfv_name)
+        bm25_path = os.path.join(self.data_path, bm25_name)
+
+        # dpr pickle load
+        if os.path.isfile(dpr_path):
+            with open(dpr_path, "rb") as file:
+                self.p_embedding_dpr = pickle.load(file)
+                self.q_encoder = torch.load("./pretrained_dpr/q_encoder_inbatch39.pt")
+            print("dpr_Embedding pickle load.")
+
+        # sparse+tfidfv pickle load
+        if os.path.isfile(tfidfv_path) and os.path.isfile(sparse_path):
+            with open(sparse_path, "rb") as file:
+                self.p_embedding_sparse = pickle.load(file)
             with open(tfidfv_path, "rb") as file:
                 self.tfidfv = pickle.load(file)
-            print("Embedding pickle load.")
-        else:
+            print("sparse_Embedding & tfidfv pickle load.")
+
+        # bm25 pickle load
+        if os.path.isfile(bm25_path):
+            with open(bm25_path, "rb") as file:
+                self.p_embedding_bm = pickle.load(file)
+            print("bm25_Embedding pickle load.")
+
+        # dpr pickle save
+        if os.path.isfile(dpr_path) is False:
+            print("Build DPR")
+            self.p_encoder, self.q_encoder = dpr(self.datasets_train, self.contexts)
+            self.p_embedding_dpr = p_emd(self.p_encoder, self.contexts)
+            with open(dpr_path, "wb") as file:
+                pickle.dump(self.p_embedding_dpr, file)
+            print("DPR Embedding pickle saved.")
+
+        # sparse+tfidfv pickle save
+        if os.path.isfile(sparse_path) is False or os.path.isfile(tfidfv_path) is False:
+            print("Build Sparse + tfidf")
+            # Transform by vectorizer
+            self.tfidfv = TfidfVectorizer(
+                tokenizer=self.tokenize_fn,
+                ngram_range=(1, 2),
+                max_features=50000,
+            )
+            self.p_embedding_sparse = self.tfidfv.fit_transform(self.contexts)
+
+            with open(sparse_path, "wb") as file:
+                pickle.dump(self.p_embedding_sparse, file)
+            print("Sparse Embedding pickle saved.")
+
+            with open(tfidfv_path, "wb") as file:
+                pickle.dump(self.tfidfv, file)
+            print("tfidfv pickle saved.")
+
+        # bm25 pickle save
+        if os.path.isfile(bm25_path) is False:
             print("Build passage embedding")
-            if self.data_args.use_faiss is False:
-                self.p_embedding = self.tfidfv.fit_transform(self.contexts)
-            print(self.p_embedding.shape)
-            with open(emd_path, "wb") as file:
-                pickle.dump(self.p_embedding, file)
-            if self.data_args.use_faiss is False:
-                with open(tfidfv_path, "wb") as file:
-                    pickle.dump(self.tfidfv, file)
-            print("Embedding pickle saved.")
+            tokenized_contexts = []
+            for text in tqdm(self.contexts):
+                tmp = []
+                # print(self.tokenize_fn(text))
+                tmp.extend(self.tokenize_fn(text))
+                assert self.ngram <= len(
+                    tmp
+                ), f"tokenized 된 길이가 ngram({self.ngram}) 보다 작습니다."
+                tmp.extend(
+                    [
+                        "".join(tmp[i : i + self.ngram])
+                        for i in range(len(tmp) - self.ngram + 1)
+                    ]
+                )
+                tokenized_contexts.append(tmp)
+
+            self.p_embedding_bm = BM25Okapi(tokenized_contexts)
+            with open(bm25_path, "wb") as file:
+                pickle.dump(self.bm25, file)
+            print("BM25 Embedding pickle saved.")
 
     def build_faiss(self, num_clusters=64) -> NoReturn:
-
+        # 현재 사용 X
         """
         Summary:
             속성으로 저장되어 있는 Passage Embedding을
@@ -153,7 +235,8 @@ class SparseRetrieval:
             self.indexer = faiss.read_index(indexer_path)
 
         else:
-            p_emb = self.p_embedding.astype(np.float32).toarray()
+            # p_emb = self.p_embedding.astype(np.float32).toarray()
+            p_emb = self.p_embedding.cpu().detach().numpy()
             emb_dim = p_emb.shape[-1]
 
             num_clusters = num_clusters
@@ -191,7 +274,9 @@ class SparseRetrieval:
                 Ground Truth가 없는 Query (test) -> Retrieval한 Passage만 반환합니다.
         """
 
-        assert self.p_embedding is not None, "get_sparse_embedding() 메소드를 먼저 수행해줘야합니다."
+        assert (
+            self.p_embedding_sparse is not None
+        ), "get_sparse_embedding() 메소드를 먼저 수행해줘야합니다."
 
         if isinstance(query_or_dataset, str):
             doc_scores, doc_indices = self.get_relevant_doc(query_or_dataset, k=topk)
@@ -252,7 +337,7 @@ class SparseRetrieval:
         ), "오류가 발생했습니다. 이 오류는 보통 query에 vectorizer의 vocab에 없는 단어만 존재하는 경우 발생합니다."
 
         with timer("query ex search"):
-            result = query_vec * self.p_embedding.T
+            result = query_vec * self.p_embedding_sparse.T
         if not isinstance(result, np.ndarray):
             result = result.toarray()
 
@@ -275,20 +360,39 @@ class SparseRetrieval:
             vocab 에 없는 이상한 단어로 query 하는 경우 assertion 발생 (예) 뙣뙇?
         """
 
-        query_vec = self.tfidfv.transform(queries)
-        assert (
-            np.sum(query_vec) != 0
-        ), "오류가 발생했습니다. 이 오류는 보통 query에 vectorizer의 vocab에 없는 단어만 존재하는 경우 발생합니다."
+        # query_vec = self.tfidfv.transform(queries)
+        # assert (
+        #     np.sum(query_vec) != 0
+        # ), "오류가 발생했습니다. 이 오류는 보통 query에 vectorizer의 vocab에 없는 단어만 존재하는 경우 발생합니다."
 
-        result = query_vec * self.p_embedding.T
-        if not isinstance(result, np.ndarray):
-            result = result.toarray()
+        # result = query_vec * self.p_embedding_sparse.T
+        # if not isinstance(result, np.ndarray):
+        #     result = result.toarray()
+        # doc_scores = []
+        # doc_indices = []
+        # for i in range(result.shape[0]):
+        #     sorted_result = np.argsort(result[i, :])[::-1]
+        #     doc_scores.append(result[i, :][sorted_result].tolist()[:k])
+        #     doc_indices.append(sorted_result.tolist()[:k])
+
         doc_scores = []
         doc_indices = []
-        for i in range(result.shape[0]):
-            sorted_result = np.argsort(result[i, :])[::-1]
-            doc_scores.append(result[i, :][sorted_result].tolist()[:k])
-            doc_indices.append(sorted_result.tolist()[:k])
+        for query in tqdm(queries, desc=f"Top-k({k}) retrieval: "):
+            tmp = []
+            tokenized_query = self.tokenize_fn(query)
+            tmp.extend(tokenized_query)
+            assert self.ngram <= len(tmp), f"tokenized 된 길이가 ngram({ngram}) 보다 작습니다."
+            tmp.extend(
+                [
+                    "".join(tmp[i : i + self.ngram])
+                    for i in range(len(tmp) - self.ngram + 1)
+                ]
+            )
+
+            scores, indices = self.p_embedding_bm.get_top_n(tmp, self.contexts, n=k)
+            doc_scores.append(scores)
+            doc_indices.append(indices)
+
         return doc_scores, doc_indices
 
     def retrieve_faiss(
@@ -408,10 +512,11 @@ class SparseRetrieval:
         assert (
             np.sum(query_vecs) != 0
         ), "오류가 발생했습니다. 이 오류는 보통 query에 vectorizer의 vocab에 없는 단어만 존재하는 경우 발생합니다."
-
-        q_embs = query_vecs.toarray().astype(np.float32)
+        q_embs = query_vecs.numpy().astype(np.float32)
+        # q_embs = query_vecs.toarray().astype(np.float32)
         D, I = self.indexer.search(q_embs, k)
-
+        print(D)
+        print(I)
         return D.tolist(), I.tolist()
 
 

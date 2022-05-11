@@ -20,6 +20,7 @@ from datasets import (
     load_from_disk,
     load_metric,
 )
+from BM25 import BM25SparseRetrieval
 from retrieval import SparseRetrieval
 from trainer_qa import QuestionAnsweringTrainer
 from transformers import (
