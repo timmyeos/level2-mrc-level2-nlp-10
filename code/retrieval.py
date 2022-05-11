@@ -74,8 +74,8 @@ class SparseRetrieval:
         self.ngram = 2  # bm25 용 ngram parameter
         self.indexer = None  # build_faiss()로 생성합니다.
         self.datasets = datasets
-        # self.datasets_train = self.datasets["validation"]
-        # self.datasets_valid = self.datasets["validation"]
+        self.datasets_train = self.datasets["train"]
+        self.datasets_valid = self.datasets["validation"]
         if self.data_args.use_preprocess:
             if self.data_args.use_parasplit:
                 para_num_limit = 4  # 문단 별 최소 문장 개수
@@ -108,16 +108,16 @@ class SparseRetrieval:
                 for idx in tqdm(range(len(self.contexts))):
                     self.contexts[idx] = preprocess(self.contexts[idx])
                 print("전처리 후 위키데이터길이: ", len(self.contexts))
-        #     for idx in tqdm(range(len(self.datasets_train))):
-        #         self.datasets_train[idx]["context"] = preprocess(
-        #             self.datasets_train[idx]["context"]
-        #         )
-        #     for idx in tqdm(range(len(self.datasets_valid))):
-        #         self.datasets_valid[idx]["context"] = preprocess(
-        #             self.datasets_valid[idx]["context"]
-        #         )
+            for idx in tqdm(range(len(self.datasets_train))):
+                self.datasets_train[idx]["context"] = preprocess(
+                    self.datasets_train[idx]["context"]
+                )
+            for idx in tqdm(range(len(self.datasets_valid))):
+                self.datasets_valid[idx]["context"] = preprocess(
+                    self.datasets_valid[idx]["context"]
+                )
 
-        #     print("훈련/검증/위키데이터 전처리 완료")
+            print("훈련/검증/위키데이터 전처리 완료")
 
     def get_sparse_embedding(self) -> NoReturn:
 
@@ -364,24 +364,26 @@ class SparseRetrieval:
         # assert (
         #     np.sum(query_vec) != 0
         # ), "오류가 발생했습니다. 이 오류는 보통 query에 vectorizer의 vocab에 없는 단어만 존재하는 경우 발생합니다."
+        query_vecs_dpr = q_emd(self.q_encoder, queries).numpy().astype(np.float32)
+        result = query_vecs_dpr * self.p_embedding_dpr.T
+        if not isinstance(result, np.ndarray):
+            result = result.toarray()
+        doc_scores_dpr = []
+        doc_indices_dpr = []
+        for i in range(result.shape[0]):
+            sorted_result = np.argsort(result[i, :])[::-1]
+            doc_scores_dpr.append(result[i, :][sorted_result].tolist()[:k])
+            doc_indices_dpr.append(sorted_result.tolist()[:k])
 
-        # result = query_vec * self.p_embedding_sparse.T
-        # if not isinstance(result, np.ndarray):
-        #     result = result.toarray()
-        # doc_scores = []
-        # doc_indices = []
-        # for i in range(result.shape[0]):
-        #     sorted_result = np.argsort(result[i, :])[::-1]
-        #     doc_scores.append(result[i, :][sorted_result].tolist()[:k])
-        #     doc_indices.append(sorted_result.tolist()[:k])
-
-        doc_scores = []
-        doc_indices = []
+        doc_scores_bm = []
+        doc_indices_bm = []
         for query in tqdm(queries, desc=f"Top-k({k}) retrieval: "):
             tmp = []
             tokenized_query = self.tokenize_fn(query)
             tmp.extend(tokenized_query)
-            assert self.ngram <= len(tmp), f"tokenized 된 길이가 ngram({ngram}) 보다 작습니다."
+            assert self.ngram <= len(
+                tmp
+            ), f"tokenized 된 길이가 ngram({self.ngram}) 보다 작습니다."
             tmp.extend(
                 [
                     "".join(tmp[i : i + self.ngram])
@@ -390,10 +392,10 @@ class SparseRetrieval:
             )
 
             scores, indices = self.p_embedding_bm.get_top_n(tmp, self.contexts, n=k)
-            doc_scores.append(scores)
-            doc_indices.append(indices)
+            doc_scores_bm.append(scores)
+            doc_indices_bm.append(indices)
 
-        return doc_scores, doc_indices
+        return doc_scores_bm, doc_indices_bm
 
     def retrieve_faiss(
         self, query_or_dataset: Union[str, Dataset], topk: Optional[int] = 1
