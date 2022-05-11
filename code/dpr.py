@@ -5,6 +5,8 @@ from transformers import (
     AutoTokenizer,
     AdamW,
     TrainingArguments,
+    AutoModel,
+    AutoConfig,
     get_linear_schedule_with_warmup,
 )
 import numpy as np
@@ -20,7 +22,7 @@ def neg_sampling(dataset, wikiset, num_neg):
     wikiset = np.array(wikiset)
     p_with_neg = []
 
-    for c in dataset:
+    for c in tqdm(dataset):
         # print(c)
         while True:
             neg_idxs = np.random.randint(len(wikiset), size=num_neg)
@@ -89,8 +91,8 @@ args = TrainingArguments(
     output_dir="dense_retireval",
     evaluation_strategy="epoch",
     learning_rate=3e-5,
-    per_device_train_batch_size=16,
-    per_device_eval_batch_size=16,
+    per_device_train_batch_size=4,
+    per_device_eval_batch_size=4,
     num_train_epochs=10,
     weight_decay=0.01,
 )
@@ -98,8 +100,17 @@ args = TrainingArguments(
 
 def train(args, num_neg, dataset, model_checkpoint):
     # p,q model
-    p_model = RobertaEncoder.from_pretrained(model_checkpoint)
-    q_model = RobertaEncoder.from_pretrained(model_checkpoint)
+    config = AutoConfig.from_pretrained(model_checkpoint)
+    p_model = AutoModel.from_pretrained(
+        model_checkpoint,
+        from_tf=bool(".ckpt" in model_checkpoint),
+        config=config,
+    )
+    q_model = AutoModel.from_pretrained(
+        model_checkpoint,
+        from_tf=bool(".ckpt" in model_checkpoint),
+        config=config,
+    )
 
     if torch.cuda.is_available():
         p_model.cuda()
@@ -229,7 +240,7 @@ def train(args, num_neg, dataset, model_checkpoint):
 
 
 def dpr(dataset_train, dataset_val, wikiset):
-    model_checkpoint = "klue/roberta-large"
+    model_checkpoint = "monologg/koelectra-base-v3-finetuned-korquad"
     tokenizer = AutoTokenizer.from_pretrained(
         model_checkpoint,
         # 'use_fast' argument를 True로 설정할 경우 rust로 구현된 tokenizer를 사용할 수 있습니다.
@@ -237,7 +248,7 @@ def dpr(dataset_train, dataset_val, wikiset):
         # rust version이 비교적 속도가 빠릅니다.
         use_fast=True,
     )
-    num_neg = 63
+    num_neg = 7
 
     train_dataset = dataset_func(tokenizer, dataset_train, wikiset, num_neg)
     p_encoder, q_encoder = train(args, num_neg, train_dataset, model_checkpoint)
@@ -246,7 +257,7 @@ def dpr(dataset_train, dataset_val, wikiset):
 
 
 def p_emd(p_encoder, wikiset):
-    model_checkpoint = "klue/roberta-large"
+    model_checkpoint = "monologg/koelectra-base-v3-finetuned-korquad"
     tokenizer = AutoTokenizer.from_pretrained(
         model_checkpoint,
         # 'use_fast' argument를 True로 설정할 경우 rust로 구현된 tokenizer를 사용할 수 있습니다.
@@ -271,7 +282,7 @@ def p_emd(p_encoder, wikiset):
 
 
 def q_emd(q_encoder, queries):
-    model_checkpoint = "klue/roberta-large"
+    model_checkpoint = "monologg/koelectra-base-v3-finetuned-korquad"
     tokenizer = AutoTokenizer.from_pretrained(
         model_checkpoint,
         # 'use_fast' argument를 True로 설정할 경우 rust로 구현된 tokenizer를 사용할 수 있습니다.
