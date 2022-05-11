@@ -438,13 +438,14 @@ class DenseRetrieval:
             with open(emd_path, "rb") as file:
                 self.p_embedding = pickle.load(file)
             self.q_encoder = torch.load(q_model_path)
+            self.tokenizer = AutoTokenizer.from_pretrained("klue/bert-base")
             print("Dense Embedding pickle load.")
         else:
             print("Build passage dense_embedding")
             ### tain data로 q,p 인코더 훈련시켜야 함
             # inbatch 시, random이 아니라 tfidf 가까운 헷갈리는 샘플 뽑아주기 위해 SparseRetrieval 사용
             retriever = SparseRetrieval(tokenize_fn=self.tokenizer.tokenize)
-            self.q_encoder, self.p_embedding = run_dpr(retriever, self.contexts, self.tokenizer, inbatch=inbatch)
+            self.q_encoder, self.p_embedding, self.tokenizer  = run_dpr(retriever, self.contexts, self.tokenizer, inbatch=inbatch)
             print('p_embedding.shape:', self.p_embedding.shape)
 
     def build_faiss(self, num_clusters=64) -> NoReturn:

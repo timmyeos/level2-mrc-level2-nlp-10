@@ -56,24 +56,24 @@ def prepare_dataset(retriever, tokenizer, inbatch):
     dataset = load_from_disk('../data/train_dataset')
 
     # train_dataset(train, validation 모두 합쳐 4192개)으로 encoder 훈련
-    # full_dataset = concatenate_datasets(
-    #     [
-    #         dataset["train"].flatten_indices(),
-    #         dataset["validation"].flatten_indices(),
-    #     ]
-    # ) 
-    # print(full_dataset)
-    dataset = dataset['train']
+    dataset = concatenate_datasets(
+        [
+            dataset["train"].flatten_indices(),
+            dataset["validation"].flatten_indices(),
+        ]
+    ) 
+    print(dataset)
+    # dataset = dataset['validation']
 
     if inbatch == False:
         # sparse embedding -> df : 각 question에 대해 topk passage의 결과를 담은 dataframe
         retriever.get_sparse_embedding()
 
-        num_topk = 6 ### 수정가능
+        num_topk = 8 ### 수정가능
         df = retriever.retrieve(dataset, topk = num_topk)
         
         # negative sampling : context(passage_list;TF-IDF의 값이 높은 passage)에서 정답을 포함하지 않는 passage를 구하여 context값으로 지정
-        num_p_with_negs = 16 ### 수정 가능
+        num_p_with_negs = 32 ### 수정 가능
         p_with_negs = []
         corpus = np.array(list(set([ex for ex in dataset['context']])))
 
@@ -160,55 +160,56 @@ def train(args, train_dataset, p_model, q_model, num_p_with_negs):
     # config={"epochs": args.num_train_epochs, "batch_size": args.per_device_train_batch_size, "learning_rate" : args.learning_rate}
     # wandb.init(project="MRCProject", config=config, name="train_encoder_8b_5e")
     for num_epochs in train_iterator:
-        epoch_iterator = tqdm(train_dataloader, desc="Iteration")
-        print(num_epochs)
+        # epoch_iterator = tqdm(train_dataloader, desc="Iteration")
         loss_value = 0
         matches = 0
-        for step, batch in enumerate(epoch_iterator):
-            p_model.train()
-            p_model.train()
-            
-            targets = torch.zeros(args.per_device_train_batch_size).long()
-            if torch.cuda.is_available():
-                batch = tuple(t.cuda() for t in batch)
-                targets = targets.cuda()
+        with tqdm(train_dataloader, unit="batch") as tepoch:
+            for batch in tepoch:
+        # for step, batch in enumerate(epoch_iterator):
+                p_model.train()
+                p_model.train()
+                
+                targets = torch.zeros(args.per_device_train_batch_size).long()
+                if torch.cuda.is_available():
+                    batch = tuple(t.cuda() for t in batch)
+                    targets = targets.cuda()
 
-            p_inputs = {'input_ids': batch[0].view(
-                                            args.per_device_train_batch_size*(num_p_with_negs), -1),
-                        'attention_mask': batch[1].view(
-                                            args.per_device_train_batch_size*(num_p_with_negs), -1),
-                        'token_type_ids': batch[2].view(
-                                            args.per_device_train_batch_size*(num_p_with_negs), -1)
-                        }
-            
-            q_inputs = {'input_ids': batch[3],
-                        'attention_mask': batch[4],
-                        'token_type_ids': batch[5]}
-            
-            p_outputs = p_model(**p_inputs)  #(batch_size*(num_p_with_negs), emb_dim)
-            q_outputs = q_model(**q_inputs)  #(batch_size*, emb_dim)
+                p_inputs = {'input_ids': batch[0].view(
+                                                args.per_device_train_batch_size*(num_p_with_negs), -1),
+                            'attention_mask': batch[1].view(
+                                                args.per_device_train_batch_size*(num_p_with_negs), -1),
+                            'token_type_ids': batch[2].view(
+                                                args.per_device_train_batch_size*(num_p_with_negs), -1)
+                            }
+                
+                q_inputs = {'input_ids': batch[3],
+                            'attention_mask': batch[4],
+                            'token_type_ids': batch[5]}
+                
+                p_outputs = p_model(**p_inputs)  #(batch_size*(num_p_with_negs), emb_dim)
+                q_outputs = q_model(**q_inputs)  #(batch_size*, emb_dim)
 
-            # Calculate similarity score & loss
-            p_outputs = torch.transpose(p_outputs.view(args.per_device_train_batch_size, num_p_with_negs, -1), 1, 2)
-            q_outputs = q_outputs.view(args.per_device_train_batch_size, 1, -1)
+                # Calculate similarity score & loss
+                p_outputs = torch.transpose(p_outputs.view(args.per_device_train_batch_size, num_p_with_negs, -1), 1, 2)
+                q_outputs = q_outputs.view(args.per_device_train_batch_size, 1, -1)
 
-            sim_scores = torch.bmm(q_outputs, p_outputs).squeeze()  #(batch_size, num_p_with_negs)
-            sim_scores = sim_scores.view(args.per_device_train_batch_size, -1)
-            sim_scores = F.log_softmax(sim_scores, dim=1)
-            preds = torch.argmax(sim_scores, dim=-1)
-            
-            loss = F.nll_loss(sim_scores, targets)
-            loss_value += loss
-            matches += (preds == targets).sum()
+                sim_scores = torch.bmm(q_outputs, p_outputs).squeeze()  #(batch_size, num_p_with_negs)
+                sim_scores = sim_scores.view(args.per_device_train_batch_size, -1)
+                sim_scores = F.log_softmax(sim_scores, dim=1)
+                preds = torch.argmax(sim_scores, dim=-1)
+                
+                loss = F.nll_loss(sim_scores, targets)
+                loss_value += loss
+                matches += (preds == targets).sum()
 
-            loss.backward()
-            optimizer.step()
-            scheduler.step()
-            q_model.zero_grad()
-            p_model.zero_grad()
-            global_step += 1
-            
-            torch.cuda.empty_cache()
+                loss.backward()
+                optimizer.step()
+                scheduler.step()
+                q_model.zero_grad()
+                p_model.zero_grad()
+                global_step += 1
+                
+                torch.cuda.empty_cache()
 
 
         # 학습된 모델 저장하기
@@ -292,7 +293,7 @@ def train_inbatch( args, train_dataset, p_model, q_model):
                     print(f'training loss : {loss:.4f}')
 
                 loss.backward()
-                # optimizer.zero_grad()
+                optimizer.zero_grad()
                 optimizer.step()
                 scheduler.step()
                 p_model.zero_grad()
@@ -303,16 +304,16 @@ def train_inbatch( args, train_dataset, p_model, q_model):
                 del p_inputs, q_inputs
 
         MODEL_PATH = "./models"
-        torch.save(p_model, os.path.join(MODEL_PATH, f"p_encoder_inbatch{num_epochs}.pt"))
-        torch.save(q_model, os.path.join(MODEL_PATH, f"q_encoder_inbatch{num_epochs}.pt"))
+        torch.save(p_model, os.path.join(MODEL_PATH, f"p_encoder_inbatch.pt"))
+        torch.save(q_model, os.path.join(MODEL_PATH, f"q_encoder_inbatch.pt"))
 
     return p_model, q_model
 
 
 def run_dpr(retriever, context, tokenizer, inbatch):
     # dense embedding만 새로 생성하고자 하는 경우
-    q_encoder_name = f"q_encoder2.pt"   ### 수정 가능 - 저장된 encoder 중 원하는 모델로
-    p_encoder_name = f"p_encoder2.pt"   ### 수정 가능 - 저장된 encoder 중 원하는 모델로
+    q_encoder_name = f"q_encoder.pt"   ### 수정 가능 - 저장된 encoder 중 원하는 모델로
+    p_encoder_name = f"p_encoder.pt"   ### 수정 가능 - 저장된 encoder 중 원하는 모델로
     q_model_path = os.path.join("./models", q_encoder_name)
     p_model_path = os.path.join("./models", p_encoder_name)
 
@@ -321,10 +322,10 @@ def run_dpr(retriever, context, tokenizer, inbatch):
         p_encoder = torch.load(p_model_path)
     else:
         # load pre-trained model on cuda (if available)
-        model_name = "klue/roberta-large" ### 수정 가능 - model.args 받아와서 model_args.model_name_or_path 해도 됨
-        p_encoder = RobertaEncoder.from_pretrained(model_name).cuda()
-        q_encoder = RobertaEncoder.from_pretrained(model_name).cuda()
-        # tokenizer = AutoTokenizer.from_pretrained(model_name) ### reader와 다른 모델 사용 시 주석 제거
+        model_name = "klue/bert-base" ### 수정 가능 - model.args 받아와서 model_args.model_name_or_path 해도 됨
+        p_encoder = BertEncoder.from_pretrained(model_name).cuda()
+        q_encoder = BertEncoder.from_pretrained(model_name).cuda()
+        tokenizer = AutoTokenizer.from_pretrained(model_name) ### reader와 다른 모델 사용 시 주석 제거
 
         # model_dict = torch.load("./dense_encoder/encoder.pth")  # 모델 파라미터들은 다운받았던 거 활용
         # p_encoder.load_state_dict(model_dict['p_encoder'])
@@ -333,14 +334,13 @@ def run_dpr(retriever, context, tokenizer, inbatch):
         # negative sampling한 dataset
         train_dataset= prepare_dataset(retriever, tokenizer, inbatch)
 
-
         args = TrainingArguments(
             output_dir="dense_retireval",
             evaluation_strategy="epoch",
             learning_rate=2e-5,
-            per_device_train_batch_size=16, ###
-            per_device_eval_batch_size=16, ###
-            num_train_epochs=20, ### 수정 가능
+            per_device_train_batch_size=1, ###
+            per_device_eval_batch_size=1, ###
+            num_train_epochs=30, ### 수정 가능
             weight_decay=0.01,
             fp16 = True
         )
@@ -348,7 +348,7 @@ def run_dpr(retriever, context, tokenizer, inbatch):
         # 학습
         # 현재 epoch 마다 encoder 모델이 저장됩니다. 마지막 encoder만 저장하고 싶으면 train 함수의 마지막을 수정해주세요.
         if inbatch == False:
-            p_encoder, q_encoder = train(args, train_dataset, p_encoder, q_encoder, num_p_with_negs=16)
+            p_encoder, q_encoder = train(args, train_dataset, p_encoder, q_encoder, num_p_with_negs=32)
         else:
             p_encoder, q_encoder = train_inbatch(args, train_dataset, p_encoder, q_encoder)
 
@@ -377,4 +377,4 @@ def run_dpr(retriever, context, tokenizer, inbatch):
         pickle.dump(p_embs, file)
     print("Dense Embedding pickle saved.")
 
-    return q_encoder, p_embs
+    return q_encoder, p_embs, tokenizer
