@@ -30,6 +30,7 @@ from datasets import DatasetDict
 from tqdm.auto import tqdm
 from transformers import PreTrainedTokenizerFast, TrainingArguments, is_torch_available
 from transformers.trainer_utils import get_last_checkpoint
+from postprocess import postprocess
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +256,8 @@ def postprocess_qa_predictions(
             if score_diff > null_score_diff_threshold:
                 all_predictions[example["id"]] = ""
             else:
-                all_predictions[example["id"]] = best_non_null_pred["text"]
+                all_predictions[example["id"]] = postprocess(best_non_null_pred["text"])
+                # all_predictions[example["id"]] = best_non_null_pred["text"]
 
         # np.float를 다시 float로 casting -> `predictions`은 JSON-serializable 가능
         all_nbest_json[example["id"]] = [
