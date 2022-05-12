@@ -78,7 +78,7 @@ class SparseRetrieval:
         self.datasets_valid = self.datasets["validation"]
         if self.data_args.use_preprocess:
             if self.data_args.use_parasplit:
-                para_num_limit = 4  # 문단 별 최소 문장 개수
+                para_num_limit = 5  # 문단 별 최소 문장 개수
                 para_len_limit = 15  # 문단 별 최소 길이
                 contexts_2 = []
                 tmp_para = ""
@@ -140,19 +140,19 @@ class SparseRetrieval:
         bm25_path = os.path.join(self.data_path, bm25_name)
 
         # dpr pickle load
-        if os.path.isfile(dpr_path):
-            with open(dpr_path, "rb") as file:
-                self.p_embedding_dpr = pickle.load(file)
-                self.q_encoder = torch.load("./pretrained_dpr/q_encoder_inbatch39.pt")
-            print("dpr_Embedding pickle load.")
+        # if os.path.isfile(dpr_path):
+        #     with open(dpr_path, "rb") as file:
+        #         self.p_embedding_dpr = pickle.load(file)
+        #         self.q_encoder = torch.load("./pretrained_dpr/q_encoder_inbatch39.pt")
+        #     print("dpr_Embedding pickle load.")
 
-        # sparse+tfidfv pickle load
-        if os.path.isfile(tfidfv_path) and os.path.isfile(sparse_path):
-            with open(sparse_path, "rb") as file:
-                self.p_embedding_sparse = pickle.load(file)
-            with open(tfidfv_path, "rb") as file:
-                self.tfidfv = pickle.load(file)
-            print("sparse_Embedding & tfidfv pickle load.")
+        # # sparse+tfidfv pickle load
+        # if os.path.isfile(tfidfv_path) and os.path.isfile(sparse_path):
+        #     with open(sparse_path, "rb") as file:
+        #         self.p_embedding_sparse = pickle.load(file)
+        #     with open(tfidfv_path, "rb") as file:
+        #         self.tfidfv = pickle.load(file)
+        #     print("sparse_Embedding & tfidfv pickle load.")
 
         # bm25 pickle load
         if os.path.isfile(bm25_path):
@@ -160,33 +160,33 @@ class SparseRetrieval:
                 self.p_embedding_bm = pickle.load(file)
             print("bm25_Embedding pickle load.")
 
-        # dpr pickle save
-        if os.path.isfile(dpr_path) is False:
-            print("Build DPR")
-            self.p_encoder, self.q_encoder = dpr(self.datasets_train, self.contexts)
-            self.p_embedding_dpr = p_emd(self.p_encoder, self.contexts)
-            with open(dpr_path, "wb") as file:
-                pickle.dump(self.p_embedding_dpr, file)
-            print("DPR Embedding pickle saved.")
+        # # dpr pickle save
+        # if os.path.isfile(dpr_path) is False:
+        #     print("Build DPR")
+        #     self.p_encoder, self.q_encoder = dpr(self.datasets_train, self.contexts)
+        #     self.p_embedding_dpr = p_emd(self.p_encoder, self.contexts)
+        #     with open(dpr_path, "wb") as file:
+        #         pickle.dump(self.p_embedding_dpr, file)
+        #     print("DPR Embedding pickle saved.")
 
-        # sparse+tfidfv pickle save
-        if os.path.isfile(sparse_path) is False or os.path.isfile(tfidfv_path) is False:
-            print("Build Sparse + tfidf")
-            # Transform by vectorizer
-            self.tfidfv = TfidfVectorizer(
-                tokenizer=self.tokenize_fn,
-                ngram_range=(1, 2),
-                max_features=50000,
-            )
-            self.p_embedding_sparse = self.tfidfv.fit_transform(self.contexts)
+        # # sparse+tfidfv pickle save
+        # if os.path.isfile(sparse_path) is False or os.path.isfile(tfidfv_path) is False:
+        #     print("Build Sparse + tfidf")
+        #     # Transform by vectorizer
+        #     self.tfidfv = TfidfVectorizer(
+        #         tokenizer=self.tokenize_fn,
+        #         ngram_range=(1, 2),
+        #         max_features=50000,
+        #     )
+        #     self.p_embedding_sparse = self.tfidfv.fit_transform(self.contexts)
 
-            with open(sparse_path, "wb") as file:
-                pickle.dump(self.p_embedding_sparse, file)
-            print("Sparse Embedding pickle saved.")
+        #     with open(sparse_path, "wb") as file:
+        #         pickle.dump(self.p_embedding_sparse, file)
+        #     print("Sparse Embedding pickle saved.")
 
-            with open(tfidfv_path, "wb") as file:
-                pickle.dump(self.tfidfv, file)
-            print("tfidfv pickle saved.")
+        #     with open(tfidfv_path, "wb") as file:
+        #         pickle.dump(self.tfidfv, file)
+        #     print("tfidfv pickle saved.")
 
         # bm25 pickle save
         if os.path.isfile(bm25_path) is False:
@@ -209,7 +209,7 @@ class SparseRetrieval:
 
             self.p_embedding_bm = BM25Okapi(tokenized_contexts)
             with open(bm25_path, "wb") as file:
-                pickle.dump(self.bm25, file)
+                pickle.dump(self.p_embedding_bm, file)
             print("BM25 Embedding pickle saved.")
 
     def build_faiss(self, num_clusters=64) -> NoReturn:
@@ -274,9 +274,9 @@ class SparseRetrieval:
                 Ground Truth가 없는 Query (test) -> Retrieval한 Passage만 반환합니다.
         """
 
-        assert (
-            self.p_embedding_sparse is not None
-        ), "get_sparse_embedding() 메소드를 먼저 수행해줘야합니다."
+        # assert (
+        #     self.p_embedding_sparse is not None
+        # ), "get_sparse_embedding() 메소드를 먼저 수행해줘야합니다."
 
         if isinstance(query_or_dataset, str):
             doc_scores, doc_indices = self.get_relevant_doc(query_or_dataset, k=topk)
@@ -346,6 +346,17 @@ class SparseRetrieval:
         doc_indices = sorted_result.tolist()[:k]
         return doc_score, doc_indices
 
+    def _softmax(self, x):
+        max = np.max(
+            x, axis=1, keepdims=True
+        )  # returns max of each row and keeps same dims
+        e_x = np.exp(x - max)  # subtracts each row with its max value
+        sum = np.sum(
+            e_x, axis=1, keepdims=True
+        )  # returns sum of each row and keeps same dims
+        f_x = e_x / sum
+        return f_x
+
     def get_relevant_doc_bulk(
         self, queries: List, k: Optional[int] = 1
     ) -> Tuple[List, List]:
@@ -359,22 +370,29 @@ class SparseRetrieval:
         Note:
             vocab 에 없는 이상한 단어로 query 하는 경우 assertion 발생 (예) 뙣뙇?
         """
-
+        # TFIDF로 점수 측정
         # query_vec = self.tfidfv.transform(queries)
         # assert (
         #     np.sum(query_vec) != 0
         # ), "오류가 발생했습니다. 이 오류는 보통 query에 vectorizer의 vocab에 없는 단어만 존재하는 경우 발생합니다."
-        query_vecs_dpr = q_emd(self.q_encoder, queries).numpy().astype(np.float32)
-        result = query_vecs_dpr * self.p_embedding_dpr.T
-        if not isinstance(result, np.ndarray):
-            result = result.toarray()
-        doc_scores_dpr = []
-        doc_indices_dpr = []
-        for i in range(result.shape[0]):
-            sorted_result = np.argsort(result[i, :])[::-1]
-            doc_scores_dpr.append(result[i, :][sorted_result].tolist()[:k])
-            doc_indices_dpr.append(sorted_result.tolist()[:k])
 
+        # DPR로 점수 측정
+        # query_vecs_dpr = q_emd(self.q_encoder, queries)
+        # print(query_vecs_dpr.size())
+        # print(self.p_embedding_dpr.size())
+        # result = query_vecs_dpr.matmul(self.p_embedding_dpr.T).numpy()
+        # if not isinstance(result, np.ndarray):
+        #     result = result.toarray()
+        # doc_scores_dpr = []
+        # doc_indices_dpr = []
+        # print(result.shape[0])
+        # print(result.shape[1])
+        # for i in range(result.shape[0]):
+        #     sorted_result = np.argsort(result[i, :])[::-1]
+        #     doc_scores_dpr.append(result[i, :][sorted_result].tolist()[:k])
+        #     doc_indices_dpr.append(sorted_result.tolist()[:k])
+
+        # BM으로 점수 측정
         doc_scores_bm = []
         doc_indices_bm = []
         for query in tqdm(queries, desc=f"Top-k({k}) retrieval: "):
@@ -395,6 +413,39 @@ class SparseRetrieval:
             doc_scores_bm.append(scores)
             doc_indices_bm.append(indices)
 
+        # # 점수 가중치
+        # weight_dpr = self.data_args.weight_dpr
+        # weight_bm = 1 - weight_dpr
+
+        # # 점수 정규화
+        # for idx, item in enumerate(doc_scores_dpr):
+        #     doc_scores_dpr[idx] = doc_scores_dpr[idx] / np.sum(doc_scores_dpr[idx])
+
+        # for idx, item in enumerate(doc_scores_bm):
+        #     doc_scores_bm[idx] = doc_scores_bm[idx] / np.sum(doc_scores_bm[idx])
+        # doc_scores_dpr = self._softmax(doc_scores_dpr)
+        # doc_scores_bm = self._softmax(doc_scores_bm)
+
+        # 보간된 점수 및 인덱스
+        # doc_scores_inter = np.zeros((len(doc_scores_dpr), k))
+        # doc_indices_inter = np.zeros((len(doc_scores_dpr), k), dtype=np.int32)
+        # for i in range(len(doc_scores_dpr)):
+        #     tmp_dict = dict()
+        #     for idx, score in zip(doc_indices_dpr[i], doc_scores_dpr[i]):
+        #         tmp_dict[idx] = weight_dpr * score
+        #     for idx, score in zip(doc_indices_bm[i], doc_scores_bm[i]):
+        #         if idx in tmp_dict.keys():
+        #             tmp_dict[idx] += weight_bm * score
+        #         else:
+        #             tmp_dict[idx] = weight_bm * score
+        #     sorted_data = sorted(
+        #         [(score, idx) for idx, score in tmp_dict.items()], reverse=True
+        #     )[:k]
+        #     for j in range(k):
+        #         doc_scores_inter[i][j] = sorted_data[j][0]
+        #         doc_indices_inter[i][j] = sorted_data[j][1]
+        # doc_scores = torch.from_numpy(doc_scores_inter)
+        # doc_indices = torch.from_numpy(doc_indices_inter)
         return doc_scores_bm, doc_indices_bm
 
     def retrieve_faiss(

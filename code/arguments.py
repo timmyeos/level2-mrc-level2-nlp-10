@@ -20,6 +20,8 @@ class ModelArguments:
             "help": "Pretrained config name or path if not the same as model_name"
         },
     )
+
+    # 실험하는 retrieval tokenizer로 이름을 바꾸면 됩니다.
     tokenizer_name: Optional[str] = field(
         default="klue/roberta-large",
         metadata={
@@ -82,7 +84,7 @@ class DataTrainingArguments:
         default=64, metadata={"help": "Define how many clusters to use for faiss."}
     )
     top_k_retrieval: int = field(
-        default=20,
+        default=10,
         metadata={
             "help": "Define how many top-k passages to retrieve based on similarity."
         },
@@ -90,10 +92,14 @@ class DataTrainingArguments:
     use_faiss: bool = field(
         default=False, metadata={"help": "Whether to build with faiss"}
     )
+    # 전처리 1,2 할때는 모두 True
+    # 전처리 안할 때는 False
     use_preprocess: bool = field(
         default=True,
         metadata={"help": "Whether to preprocess datasets(train/val/wiki)"},
     )
+    # 전처리 1 할 때는 False
+    # 전처리 2 할 때는 True
     use_parasplit: bool = field(
         default=True,
         metadata={"help": "Whether to split passages into paragraphs)"},
@@ -109,4 +115,7 @@ class DataTrainingArguments:
     use_dpr: bool = field(
         default=True,
         metadata={"help": "Whether to use dpr)"},
+    )
+    weight_dpr: float = field(
+        default=0, metadata={"help": "Define weight for dpr to score."}
     )
