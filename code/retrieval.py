@@ -76,6 +76,8 @@ class SparseRetrieval:
         self.datasets = datasets
         self.datasets_train = self.datasets["train"]
         self.datasets_valid = self.datasets["validation"]
+        if self.data_args.use_preprocess is False:
+            self.contexts = contexts
         if self.data_args.use_preprocess:
             if self.data_args.use_parasplit:
                 para_num_limit = 5  # 문단 별 최소 문장 개수
