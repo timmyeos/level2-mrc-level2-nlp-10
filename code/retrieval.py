@@ -106,7 +106,7 @@ class SparseRetrieval:
                         print("공백이들어감.")
                 print("문장분리 후 위키데이터 길이: ", len(self.contexts))
             else:
-                self.contexts = datasets
+                self.contexts = contexts
                 for idx in tqdm(range(len(self.contexts))):
                     self.contexts[idx] = preprocess(self.contexts[idx])
                 print("전처리 후 위키데이터길이: ", len(self.contexts))
