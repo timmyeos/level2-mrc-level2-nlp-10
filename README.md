@@ -310,3 +310,8 @@ wrap up report 피드백을 본격적으로 시작하기 앞서 다들 5주간 �
         - Reader의 성능을 많이 개선하지 못했다.
     - **프로젝트를 통해 배운 점 또는 시사점**
         - ODQA에서는 Retrieval의 성능이 매우 중요하다.
+<br>
+
+# ODQA 실행 화면
+
+<img src="https://user-images.githubusercontent.com/97524127/169532321-a0b090d1-47e3-4a3f-85ad-29db4a544066.gif" height=500>
