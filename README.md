@@ -1,3 +1,16 @@
+## 📋 Report
+
+- [NLP] MRC 대회 WrapUP 리포트(PDF 파일 다운로드) : [MRC_NLP_팀 리포트(10조).pdf](https://github.com/boostcampaitech3/level2-mrc-level2-nlp-10/files/8732083/MRC_NLP_.10.pdf)
+
+# 👋 팀원 소개
+### Members
+|김남현|민원식|전태양|정기원|주정호|최지민|
+|:-:|:-:|:-:|:-:|:-:|:-:|
+|<img src='https://avatars.githubusercontent.com/u/54979241?v=4' height=80 width=80px></img>|<img src='https://user-images.githubusercontent.com/73579424/164642795-b5413071-8b14-458d-8d57-a2e32e72f7f9.png' height=80 width=80px></img>|<img src='https://avatars.githubusercontent.com/u/55140109?v=4' height=80 width=80px></img>|<img src='https://user-images.githubusercontent.com/73579424/164643061-599b9409-dc21-4f7a-8c72-b5d5dbfe9fab.jpg' height=80 width=80px></img>|<img src='https://user-images.githubusercontent.com/73579424/164643280-b0981ca3-528a-4c68-9331-b8f7a1cbe414.jpg' height=80 width=80px></img>|<img src='https://avatars.githubusercontent.com/u/97524127?v=4' height=80 width=80px></img>|
+|[Github](https://github.com/NHRWV)|[Github](https://github.com/wertat)|[Github](https://github.com/JEONSUN)|[Github](https://github.com/greenare)|[Github](https://github.com/jujeongho0)|[Github](https://github.com/timmyeos)|
+
+<br>
+
 # NLP 10조 ODQA 대회
 
 ### ○ 프로젝트 개요
@@ -259,7 +272,3 @@
         - Reader의 성능을 많이 개선하지 못했다.
     - **프로젝트를 통해 배운 점 또는 시사점**
         - ODQA에서는 Retrieval의 성능이 매우 중요하다.
-
-## 📋 Report
-
-- [NLP] MRC 대회 WrapUP 리포트(PDF 파일 다운로드) : [MRC_NLP_팀 리포트(10조).pdf](https://github.com/boostcampaitech3/level2-mrc-level2-nlp-10/files/8732083/MRC_NLP_.10.pdf)
