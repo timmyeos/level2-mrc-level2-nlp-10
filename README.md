@@ -1,4 +1,4 @@
-# level2-mrc-level2-nlp-10
+# NLP 10조 ODQA 대회
 
 ### ○ 프로젝트 개요
 
