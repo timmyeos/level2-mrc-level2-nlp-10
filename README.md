@@ -46,7 +46,7 @@ wrap up report 피드백을 본격적으로 시작하기 앞서 다들 5주간 �
 |:-:|:-:|:-:|:-:|:-:|:-:|
 |<img src='https://avatars.githubusercontent.com/u/54979241?v=4' height=80 width=80px></img>|<img src='https://user-images.githubusercontent.com/73579424/164642795-b5413071-8b14-458d-8d57-a2e32e72f7f9.png' height=80 width=80px></img>|<img src='https://avatars.githubusercontent.com/u/55140109?v=4' height=80 width=80px></img>|<img src='https://user-images.githubusercontent.com/73579424/164643061-599b9409-dc21-4f7a-8c72-b5d5dbfe9fab.jpg' height=80 width=80px></img>|<img src='https://user-images.githubusercontent.com/73579424/164643280-b0981ca3-528a-4c68-9331-b8f7a1cbe414.jpg' height=80 width=80px></img>|<img src='https://avatars.githubusercontent.com/u/97524127?v=4' height=80 width=80px></img>|
 |[Github](https://github.com/NHRWV)|[Github](https://github.com/wertat)|[Github](https://github.com/JEONSUN)|[Github](https://github.com/greenare)|[Github](https://github.com/jujeongho0)|[Github](https://github.com/timmyeos)|
-|DPR+Reader Model 실험| DPR 모델, BM25 구현 및 실험 | EDA, retriever 관련 실험 진행| Data Processing, Tokenizer/MLM 관련 실험,  협업 환경 구축 | Reader Modeling & Fine-Tuning, Ensemble, Augmentation | EDA, DPR(In-batch negative) 구현 및 Fine-Tuning, 프로토타입 |
+|DPR+Reader Model 실험| DPR 모델, BM25 구현 및 실험 | EDA, retriever 관련 실험 진행| Data Processing, Tokenizer/MLM 관련 실험,  협업 환경 구축 | Reader Modeling & Fine-Tuning, Ensemble, Augmentation | EDA, DPR(In-batch negative) 구현 및 Fine-Tuning, 프로토타입(Streamlit) |
 
 <br>
 
