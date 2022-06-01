@@ -40,7 +40,7 @@ wrap up report 피드백을 본격적으로 시작하기 앞서 다들 5주간 �
 
 <br/>
 
-# 👋 팀원 소개
+## 👋 팀원 소개
 ### Members
 |김남현|민원식|전태양|정기원|주정호|최지민|
 |:-:|:-:|:-:|:-:|:-:|:-:|
@@ -50,7 +50,7 @@ wrap up report 피드백을 본격적으로 시작하기 앞서 다들 5주간 �
 
 <br>
 
-# 💻 ODQA 실행 화면
+## 💻 ODQA 실행 화면
 
 <img src="https://user-images.githubusercontent.com/97524127/169532321-a0b090d1-47e3-4a3f-85ad-29db4a544066.gif" height=500>
 
