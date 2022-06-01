@@ -50,13 +50,13 @@ wrap up report 피드백을 본격적으로 시작하기 앞서 다들 5주간 �
 
 <br>
 
-# 💻ODQA 실행 화면
+# 💻 ODQA 실행 화면
 
 <img src="https://user-images.githubusercontent.com/97524127/169532321-a0b090d1-47e3-4a3f-85ad-29db4a544066.gif" height=500>
 
 <br>
 
-# NLP 10조 ODQA 대회
+# 🏆 NLP 10조 ODQA 대회
    
 > Open-Domain Question Answering (ODQA) 주어지는 지문이 따로 존재하지 않고 사전에 구축되어있는 Knowledge resource 에서 질문에 대답할 수 있는 문서를 찾는 Task
     
